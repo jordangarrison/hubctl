@@ -2,7 +2,7 @@ Gem::Specification.new do |spec|
   spec.name          = "hubctl"
   spec.version       = "0.1.0"
   spec.authors       = ["Jordan Garrison"]
-  spec.email         = ["you@example.com"]
+  spec.email         = ["jordan@jordangarrison.dev"]
 
   spec.summary       = "A comprehensive CLI tool for GitHub administration"
   spec.description   = "hubctl is a feature-rich CLI tool for managing GitHub users, teams, repositories, and organizations with support for multiple output formats, interactive prompts, and comprehensive error handling."
