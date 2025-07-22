@@ -57,6 +57,9 @@
             openssl
             zlib
             gnumake
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            # macOS-specific dependencies
+            clang
           ];
 
           shellHook = ''
