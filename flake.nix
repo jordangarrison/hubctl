@@ -14,29 +14,59 @@
         # Ruby version to use
         ruby = pkgs.ruby_3_3;
 
-        # Simple wrapper script that uses the local bundler environment
-        hubctl = pkgs.writeShellScriptBin "hubctl" ''
-          set -e
+        # Package that works both locally and remotely
+        hubctl = pkgs.stdenv.mkDerivation rec {
+          pname = "hubctl";
+          version = "0.1.0";
 
-          # Work from current directory, not Nix store
-          if [ ! -f "bin/hubctl" ]; then
-            echo "Error: Must run from hubctl project directory" >&2
-            exit 1
-          fi
+          src = ./.;
 
-          # Ensure gems are installed in current directory
-          if [ ! -d "vendor/bundle" ]; then
-            echo "Installing gems..." >&2
-            ${pkgs.bundler}/bin/bundle config set --local deployment true
-            ${pkgs.bundler}/bin/bundle config set --local path vendor/bundle
-            ${pkgs.bundler}/bin/bundle install --quiet
-          fi
+          nativeBuildInputs = [ ruby pkgs.bundler ] ++ (with pkgs; [
+            # Native extension build dependencies
+            pkg-config
+            libxml2
+            libxslt
+            libyaml
+            openssl
+            zlib
+            gnumake
+          ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            # macOS-specific dependencies
+            pkgs.clang
+          ];
 
-          # Run hubctl with proper environment from current directory
-          export BUNDLE_DEPLOYMENT=true
-          export BUNDLE_PATH=vendor/bundle
-          ${pkgs.bundler}/bin/bundle exec ${ruby}/bin/ruby bin/hubctl "$@"
-        '';
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export GEM_HOME=$out/lib/ruby/gems
+            export BUNDLE_PATH=$out/lib/ruby/gems
+
+            # Clean any existing config
+            rm -rf .bundle || true
+
+            # Install gems into the output
+            bundle config set path $out/lib/ruby/gems
+            bundle install --quiet --no-deployment
+          '';
+
+          installPhase = ''
+            mkdir -p $out/bin $out/src
+
+            # Copy all source files
+            cp -r lib $out/src/
+            cp -r bin $out/src/
+            cp Gemfile Gemfile.lock $out/src/ 2>/dev/null || true
+
+            # Create wrapper script
+            cat > $out/bin/hubctl << EOF
+            #!/bin/sh
+            export GEM_HOME=$out/lib/ruby/gems
+            export BUNDLE_PATH=$out/lib/ruby/gems
+            cd $out/src
+            exec ${ruby}/bin/ruby -I$out/src/lib bin/hubctl "\$@"
+            EOF
+                        chmod +x $out/bin/hubctl
+          '';
+        };
 
       in
       {
