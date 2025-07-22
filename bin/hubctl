@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Set up bundler to load gems from vendor/bundle
+require 'bundler/setup' if File.exist?(File.expand_path('../Gemfile', __dir__))
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'hubctl'
+
+Signal.trap('INT') do
+  puts 'SIGINT received'
+  exit 0
+end
+Signal.trap('TERM') do
+  puts 'SIGTERM received'
+  exit 0
+end
+
+Hubctl::CLI.start(ARGV)

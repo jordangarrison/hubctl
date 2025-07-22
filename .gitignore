@@ -1,0 +1,72 @@
+# Ruby & Bundler
+vendor/bundle/
+vendor/cache/
+.bundle/
+
+# Gem build artifacts
+*.gem
+pkg/
+.gem/
+
+# Ruby version managers
+.ruby-version
+.rbenv-version
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+log/
+
+# Temporary files
+tmp/
+temp/
+
+# Coverage reports
+coverage/
+.simplecov
+
+# Nix
+result
+result-*
+
+# Direnv
+.direnv/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# RuboCop cache
+.rubocop-*
+
+# Solargraph cache
+.solargraph/
+
+# Test artifacts
+.rspec
+spec/examples.txt
+
+# Documentation
+doc/
+.yardoc/
+.yard/
+
+# Tags
+tags
+TAGS
