@@ -6,6 +6,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "A comprehensive CLI tool for GitHub administration"
   spec.description   = "hubctl is a feature-rich CLI tool for managing GitHub users, teams, repositories, and organizations with support for multiple output formats, interactive prompts, and comprehensive error handling."
+  spec.homepage      = "https://github.com/jordangarrison/hubctl"
   spec.license       = "MIT"
 
   spec.required_ruby_version = ">= 3.1"
