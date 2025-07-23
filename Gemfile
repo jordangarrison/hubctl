@@ -21,3 +21,6 @@ gem "json", "~> 2.6"
 # Development gems
 gem "solargraph", "~> 0.56.1", groups: [:development, :test]
 gem "rubocop", "~> 1.78", group: :development
+gem "rspec", "~> 3.12", groups: [:development, :test]
+gem "simplecov", "~> 0.22", groups: [:development, :test]
+gem "rake", "~> 13.0", groups: [:development, :test]

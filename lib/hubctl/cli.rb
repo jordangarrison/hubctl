@@ -112,6 +112,9 @@ module Hubctl
     desc 'orgs SUBCOMMAND ...ARGS', 'Manage GitHub organizations'
     subcommand 'orgs', Orgs
 
+    desc 'enterprise SUBCOMMAND ...ARGS', 'Manage GitHub Enterprise'
+    subcommand 'enterprise', Enterprise
+
     desc 'server', 'Start hubctl in server mode'
     method_option :port, type: :numeric, default: 3000, desc: 'Port to run server on'
     method_option :host, type: :string, default: '0.0.0.0', desc: 'Host to bind server to'

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'octokit'
 require 'pastel'
 
@@ -155,6 +157,148 @@ module Hubctl
 
     def replace_all_topics(repo, topics)
       @client.replace_all_topics(repo, topics)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # === ENTERPRISE METHODS ===
+
+    # Enterprise account methods
+    def enterprise(enterprise)
+      @client.get("/enterprises/#{enterprise}")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_organizations(enterprise, options = {})
+      @client.paginate("/enterprises/#{enterprise}/organizations", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def create_enterprise_organization(enterprise, login, options = {})
+      @client.post("/enterprises/#{enterprise}/organizations", { login: login }.merge(options))
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Enterprise members and owners
+    def enterprise_members(enterprise, options = {})
+      @client.paginate("/enterprises/#{enterprise}/members", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_owners(enterprise, options = {})
+      @client.paginate("/enterprises/#{enterprise}/owners", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def add_enterprise_owner(enterprise, username)
+      @client.put("/enterprises/#{enterprise}/owners/#{username}")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def remove_enterprise_owner(enterprise, username)
+      @client.delete("/enterprises/#{enterprise}/owners/#{username}")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_member_organizations(enterprise, username, options = {})
+      @client.paginate("/enterprises/#{enterprise}/members/#{username}/organizations", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Enterprise billing and consumption
+    def enterprise_consumed_licenses(enterprise)
+      @client.get("/enterprises/#{enterprise}/consumed-licenses")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_actions_billing(enterprise)
+      # Try new endpoint first, fallback to old one
+      begin
+        @client.get("/enterprises/#{enterprise}/billing/actions")
+      rescue Octokit::NotFound
+        # Fallback to old endpoint
+        @client.get("/enterprises/#{enterprise}/settings/billing/actions")
+      end
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_packages_billing(enterprise)
+      @client.get("/enterprises/#{enterprise}/settings/billing/packages")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def enterprise_shared_storage_billing(enterprise)
+      @client.get("/enterprises/#{enterprise}/settings/billing/shared-storage")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Enterprise audit log
+    def enterprise_audit_log(enterprise, options = {})
+      @client.paginate("/enterprises/#{enterprise}/audit-log", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Enterprise settings and policies
+    def enterprise_security_analysis_settings(enterprise)
+      @client.get("/enterprises/#{enterprise}/code_security_analysis")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def update_enterprise_security_analysis_settings(enterprise, options = {})
+      @client.patch("/enterprises/#{enterprise}/code_security_analysis", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # SAML SSO methods for enterprise
+    def enterprise_saml_sso_authorization(enterprise, login)
+      @client.get("/enterprises/#{enterprise}/sso/authorizations/#{login}")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def list_enterprise_saml_sso_authorizations(enterprise, options = {})
+      @client.paginate("/enterprises/#{enterprise}/sso/authorizations", options)
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def remove_enterprise_saml_sso_authorization(enterprise, login)
+      @client.delete("/enterprises/#{enterprise}/sso/authorizations/#{login}")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Enterprise statistics and insights
+    def enterprise_stats(enterprise)
+      @client.get("/enterprises/#{enterprise}/stats/all")
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    # Organization management within enterprise
+    def transfer_organization_to_enterprise(enterprise, org)
+      @client.post("/enterprises/#{enterprise}/organizations", { organization: org })
+    rescue Octokit::Error => e
+      handle_api_error(e)
+    end
+
+    def remove_organization_from_enterprise(enterprise, org)
+      @client.delete("/enterprises/#{enterprise}/organizations/#{org}")
     rescue Octokit::Error => e
       handle_api_error(e)
     end

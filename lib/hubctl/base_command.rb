@@ -94,5 +94,17 @@ module Hubctl
       formatter.info("Specify with --org=ORG or set default: hubctl config set default_org ORG")
       exit 1
     end
+
+    def default_enterprise
+      options[:enterprise] || ENV['GITHUB_ENTERPRISE'] || Config.get('default_enterprise')
+    end
+
+    def require_enterprise!
+      return default_enterprise if default_enterprise
+
+      formatter.error("Enterprise is required but not specified")
+      formatter.info("Specify with --enterprise=ENTERPRISE or set default: hubctl config set default_enterprise ENTERPRISE")
+      exit 1
+    end
   end
 end
