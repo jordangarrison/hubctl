@@ -60,6 +60,7 @@ result-*
 
 # Test artifacts
 .rspec
+.rspec_status
 spec/examples.txt
 
 # Documentation
