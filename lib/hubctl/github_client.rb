@@ -162,10 +162,26 @@ module Hubctl
     end
 
     # === ENTERPRISE METHODS ===
+    # Note: GitHub Enterprise Cloud doesn't have direct /enterprises/{enterprise} endpoints
+    # Most enterprise functionality is accessed through organization endpoints
 
     # Enterprise account methods
     def enterprise(enterprise)
-      @client.get("/enterprises/#{enterprise}")
+      # For Enterprise Cloud, we get enterprise info through the primary org
+      # This is a workaround since /enterprises/{enterprise} doesn't exist in Enterprise Cloud
+      org_data = @client.organization(enterprise)
+      if org_data.plan.name == 'enterprise'
+        {
+          login: enterprise,
+          name: org_data.name,
+          description: org_data.description,
+          plan: org_data.plan.name,
+          created_at: org_data.created_at,
+          updated_at: org_data.updated_at
+        }
+      else
+        raise APIError, "Organization #{enterprise} is not an enterprise account"
+      end
     rescue Octokit::Error => e
       handle_api_error(e)
     end
@@ -221,25 +237,23 @@ module Hubctl
     end
 
     def enterprise_actions_billing(enterprise)
-      # Try new endpoint first, fallback to old one
-      begin
-        @client.get("/enterprises/#{enterprise}/billing/actions")
-      rescue Octokit::NotFound
-        # Fallback to old endpoint
-        @client.get("/enterprises/#{enterprise}/settings/billing/actions")
-      end
+      # Use new unified billing API endpoint per GitHub documentation
+      # https://docs.github.com/en/enterprise-cloud@latest/billing/managing-your-billing/automating-usage-reporting
+      @client.get("/enterprises/#{enterprise}/settings/billing/usage")
     rescue Octokit::Error => e
       handle_api_error(e)
     end
 
     def enterprise_packages_billing(enterprise)
-      @client.get("/enterprises/#{enterprise}/settings/billing/packages")
+      # Use new billing API endpoint per GitHub documentation
+      @client.get("/enterprises/#{enterprise}/billing/packages")
     rescue Octokit::Error => e
       handle_api_error(e)
     end
 
     def enterprise_shared_storage_billing(enterprise)
-      @client.get("/enterprises/#{enterprise}/settings/billing/shared-storage")
+      # Use new billing API endpoint per GitHub documentation
+      @client.get("/enterprises/#{enterprise}/billing/shared-storage")
     rescue Octokit::Error => e
       handle_api_error(e)
     end

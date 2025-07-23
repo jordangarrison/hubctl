@@ -295,62 +295,84 @@ module Hubctl
       ensure_authenticated!
 
       begin
-        licenses, actions_billing, packages_billing, storage_billing = nil, nil, nil, nil
-
-        with_spinner("Fetching enterprise billing information") do
-          licenses = github_client.enterprise_consumed_licenses(enterprise)
-          actions_billing = github_client.enterprise_actions_billing(enterprise) rescue nil
-          packages_billing = github_client.enterprise_packages_billing(enterprise) rescue nil
-          storage_billing = github_client.enterprise_shared_storage_billing(enterprise) rescue nil
+        billing_data = with_spinner("Fetching enterprise billing information") do
+          github_client.enterprise_actions_billing(enterprise)
         end
 
-        formatter.info("=== Enterprise License Consumption ===")
-        if licenses
-          formatter.info("Total seats: #{licenses[:total_seats_consumed]}/#{licenses[:total_seats_purchased]}")
-          formatter.info("Active users: #{licenses[:total_advanced_security_committers]}")
+        # Process the new usageItems format
+        usage_items = billing_data[:usageItems] || []
+        
+        if usage_items.empty?
+          formatter.info("No billing usage data found for enterprise #{enterprise}")
+          return
         end
 
-        if actions_billing
-          formatter.info("\n=== GitHub Actions Billing ===")
+        # Group usage items by product
+        actions_items = usage_items.select { |item| item[:product] == 'actions' }
+        packages_items = usage_items.select { |item| item[:product] == 'packages' }
+        copilot_items = usage_items.select { |item| item[:product] == 'copilot' }
+
+        # Display GitHub Actions billing
+        unless actions_items.empty?
+          formatter.info("=== GitHub Actions Billing ===")
           
-          # Basic metrics
-          total_used = actions_billing[:total_minutes_used] || 0
-          paid_minutes = actions_billing[:total_paid_minutes_used] || 0
-          included = actions_billing[:included_minutes] || 0
+          # Calculate totals from usage items
+          total_minutes = actions_items.select { |item| item[:unitType] == 'Minutes' }
+                                     .sum { |item| item[:quantity] || 0 }
+          total_cost = actions_items.sum { |item| item[:netAmount] || 0 }
           
-          formatter.info("Total minutes used: #{total_used}")
-          formatter.info("Paid minutes used: #{paid_minutes}")
-          formatter.info("Included free minutes: #{included}")
+          formatter.info("Total minutes used: #{total_minutes.to_i}")
+          formatter.info("Total cost: $#{total_cost.round(2)}")
           
-          # Calculate utilisation percentage
-          pct_used = included.to_f.zero? ? 0 : (total_used.to_f / included * 100).round(2)
-          formatter.info("Percentage of included minutes used: #{pct_used}%")
+          # Group by runner type (SKU)
+          runner_breakdown = {}
+          actions_items.select { |item| item[:unitType] == 'Minutes' }.each do |item|
+            sku = item[:sku] || 'Unknown'
+            runner_breakdown[sku] ||= { minutes: 0, cost: 0 }
+            runner_breakdown[sku][:minutes] += item[:quantity] || 0
+            runner_breakdown[sku][:cost] += item[:netAmount] || 0
+          end
           
-          # Extract minutes used breakdown
-          minutes_used_breakdown = actions_billing[:minutes_used_breakdown] || {}
-          
-          # Display runner type breakdown in concise format
-          unless minutes_used_breakdown.empty?
-            formatter.info("Minutes used by runner type:")
-            minutes_used_breakdown.each do |runner, mins|
-              formatter.info("  #{runner.capitalize}: #{mins}")
+          unless runner_breakdown.empty?
+            formatter.info("\nRunner type breakdown:")
+            runner_breakdown.sort_by { |_, data| -data[:minutes] }.each do |sku, data|
+              percentage = total_minutes > 0 ? ((data[:minutes] / total_minutes) * 100).round(1) : 0
+              formatter.info("  #{sku}: #{data[:minutes].to_i} minutes (#{percentage}%) - $#{data[:cost].round(2)}")
             end
           end
         end
 
-        if packages_billing
-          formatter.info("\n=== Packages Billing ===")
-          formatter.info("Total gigabytes bandwidth used: #{packages_billing[:total_gigabytes_bandwidth_used]}")
-          formatter.info("Total paid gigabytes bandwidth used: #{packages_billing[:total_paid_gigabytes_bandwidth_used]}")
-          formatter.info("Included gigabytes bandwidth: #{packages_billing[:included_gigabytes_bandwidth]}")
+        # Display GitHub Packages billing
+        unless packages_items.empty?
+          formatter.info("\n=== GitHub Packages Billing ===")
+          
+          total_storage = packages_items.select { |item| item[:sku]&.include?('storage') }
+                                       .sum { |item| item[:quantity] || 0 }
+          total_transfer = packages_items.select { |item| item[:sku]&.include?('transfer') }
+                                        .sum { |item| item[:quantity] || 0 }
+          total_packages_cost = packages_items.sum { |item| item[:netAmount] || 0 }
+          
+          formatter.info("Total storage: #{total_storage.round(2)} GB-hours")
+          formatter.info("Total data transfer: #{total_transfer.round(2)} GB")
+          formatter.info("Total cost: $#{total_packages_cost.round(2)}")
         end
 
-        if storage_billing
-          formatter.info("\n=== Shared Storage Billing ===")
-          formatter.info("Days left in billing cycle: #{storage_billing[:days_left_in_billing_cycle]}")
-          formatter.info("Estimated paid storage for month: #{storage_billing[:estimated_paid_storage_for_month]} GB")
-          formatter.info("Estimated storage usage: #{storage_billing[:estimated_storage_usage]} GB")
+        # Display GitHub Copilot billing
+        unless copilot_items.empty?
+          formatter.info("\n=== GitHub Copilot Billing ===")
+          
+          total_users = copilot_items.sum { |item| item[:quantity] || 0 }
+          total_copilot_cost = copilot_items.sum { |item| item[:netAmount] || 0 }
+          
+          formatter.info("Total user-months: #{total_users.round(2)}")
+          formatter.info("Total cost: $#{total_copilot_cost.round(2)}")
         end
+
+        # Summary
+        total_enterprise_cost = usage_items.sum { |item| item[:netAmount] || 0 }
+        formatter.info("\n=== Total Enterprise Billing ===")
+        formatter.info("Total enterprise cost: $#{total_enterprise_cost.round(2)}")
+        
       rescue => e
         handle_error(e)
       end
