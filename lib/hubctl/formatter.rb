@@ -47,6 +47,10 @@ module Hubctl
       @pastel.dim(text)
     end
 
+    def json?
+      @format == :json
+    end
+
     private
 
     def output_stream

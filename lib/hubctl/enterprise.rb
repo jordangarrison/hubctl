@@ -312,17 +312,17 @@ module Hubctl
         packages_items = usage_items.select { |item| item[:product] == 'packages' }
         copilot_items = usage_items.select { |item| item[:product] == 'copilot' }
 
-        # Display GitHub Actions billing
+        # Build structured billing data
+        billing_summary = {
+          enterprise: enterprise,
+          total_cost: usage_items.sum { |item| item[:netAmount] || 0 }.round(2)
+        }
+
+        # GitHub Actions billing
         unless actions_items.empty?
-          formatter.info("=== GitHub Actions Billing ===")
-          
-          # Calculate totals from usage items
           total_minutes = actions_items.select { |item| item[:unitType] == 'Minutes' }
                                      .sum { |item| item[:quantity] || 0 }
           total_cost = actions_items.sum { |item| item[:netAmount] || 0 }
-          
-          formatter.info("Total minutes used: #{total_minutes.to_i}")
-          formatter.info("Total cost: $#{total_cost.round(2)}")
           
           # Group by runner type (SKU)
           runner_breakdown = {}
@@ -333,45 +333,55 @@ module Hubctl
             runner_breakdown[sku][:cost] += item[:netAmount] || 0
           end
           
-          unless runner_breakdown.empty?
-            formatter.info("\nRunner type breakdown:")
-            runner_breakdown.sort_by { |_, data| -data[:minutes] }.each do |sku, data|
-              percentage = total_minutes > 0 ? ((data[:minutes] / total_minutes) * 100).round(1) : 0
-              formatter.info("  #{sku}: #{data[:minutes].to_i} minutes (#{percentage}%) - $#{data[:cost].round(2)}")
-            end
+          # Add percentage to runner breakdown
+          runner_breakdown.each do |sku, data|
+            data[:percentage] = total_minutes > 0 ? ((data[:minutes] / total_minutes) * 100).round(1) : 0
+            data[:minutes] = data[:minutes].to_i
+            data[:cost] = data[:cost].round(2)
           end
+          
+          billing_summary[:actions] = {
+            total_minutes: total_minutes.to_i,
+            total_cost: total_cost.round(2),
+            runner_breakdown: runner_breakdown
+          }
         end
 
-        # Display GitHub Packages billing
+        # GitHub Packages billing
         unless packages_items.empty?
-          formatter.info("\n=== GitHub Packages Billing ===")
-          
           total_storage = packages_items.select { |item| item[:sku]&.include?('storage') }
                                        .sum { |item| item[:quantity] || 0 }
           total_transfer = packages_items.select { |item| item[:sku]&.include?('transfer') }
                                         .sum { |item| item[:quantity] || 0 }
           total_packages_cost = packages_items.sum { |item| item[:netAmount] || 0 }
           
-          formatter.info("Total storage: #{total_storage.round(2)} GB-hours")
-          formatter.info("Total data transfer: #{total_transfer.round(2)} GB")
-          formatter.info("Total cost: $#{total_packages_cost.round(2)}")
+          billing_summary[:packages] = {
+            total_storage_gb_hours: total_storage.round(2),
+            total_data_transfer_gb: total_transfer.round(2),
+            total_cost: total_packages_cost.round(2)
+          }
         end
 
-        # Display GitHub Copilot billing
+        # GitHub Copilot billing
         unless copilot_items.empty?
-          formatter.info("\n=== GitHub Copilot Billing ===")
-          
           total_users = copilot_items.sum { |item| item[:quantity] || 0 }
           total_copilot_cost = copilot_items.sum { |item| item[:netAmount] || 0 }
           
-          formatter.info("Total user-months: #{total_users.round(2)}")
-          formatter.info("Total cost: $#{total_copilot_cost.round(2)}")
+          billing_summary[:copilot] = {
+            total_user_months: total_users.round(2),
+            total_cost: total_copilot_cost.round(2)
+          }
         end
 
-        # Summary
-        total_enterprise_cost = usage_items.sum { |item| item[:netAmount] || 0 }
-        formatter.info("\n=== Total Enterprise Billing ===")
-        formatter.info("Total enterprise cost: $#{total_enterprise_cost.round(2)}")
+        # Output the billing data differently based on format
+        # JSON format gets the structured data, table format gets flattened data
+        if formatter.json?
+          formatter.output(billing_summary)
+        else
+          # Create flattened data for better table display
+          flattened_data = flatten_billing_summary(billing_summary)
+          formatter.output(flattened_data, headers: %w[category metric value])
+        end
         
       rescue => e
         handle_error(e)
@@ -552,6 +562,53 @@ module Hubctl
     subcommand 'saml-sso', SamlSso
 
     private
+
+    # Flatten the billing summary into a table-friendly array of hashes
+    def flatten_billing_summary(billing_summary)
+      table_data = []
+      
+      # Enterprise summary
+      table_data << { category: "Enterprise", metric: "Name", value: billing_summary[:enterprise] }
+      table_data << { category: "Enterprise", metric: "Total Cost", value: "$#{billing_summary[:total_cost]}" }
+      
+      # GitHub Actions billing
+      if billing_summary[:actions]
+        actions = billing_summary[:actions]
+        table_data << { category: "Actions", metric: "Total Minutes", value: actions[:total_minutes].to_s }
+        table_data << { category: "Actions", metric: "Total Cost", value: "$#{actions[:total_cost]}" }
+        
+        # Runner breakdown sorted by minutes (descending)
+        actions[:runner_breakdown].sort_by { |_, data| -data[:minutes] }.each do |sku, data|
+          table_data << { 
+            category: "Actions - #{sku}", 
+            metric: "Minutes (Share)", 
+            value: "#{data[:minutes]} (#{data[:percentage]}%)" 
+          }
+          table_data << { 
+            category: "Actions - #{sku}", 
+            metric: "Cost", 
+            value: "$#{data[:cost]}" 
+          }
+        end
+      end
+      
+      # GitHub Packages billing
+      if billing_summary[:packages]
+        packages = billing_summary[:packages]
+        table_data << { category: "Packages", metric: "Storage (GB-hours)", value: packages[:total_storage_gb_hours].to_s }
+        table_data << { category: "Packages", metric: "Data Transfer (GB)", value: packages[:total_data_transfer_gb].to_s }
+        table_data << { category: "Packages", metric: "Total Cost", value: "$#{packages[:total_cost]}" }
+      end
+      
+      # GitHub Copilot billing
+      if billing_summary[:copilot]
+        copilot = billing_summary[:copilot]
+        table_data << { category: "Copilot", metric: "User-Months", value: copilot[:total_user_months].to_s }
+        table_data << { category: "Copilot", metric: "Total Cost", value: "$#{copilot[:total_cost]}" }
+      end
+      
+      table_data
+    end
 
     # Calculate estimated cost based on GitHub Actions pricing
     # Basic GitHub pricing as of 2024 (subject to change):
