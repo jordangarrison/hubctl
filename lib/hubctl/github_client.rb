@@ -200,13 +200,101 @@ module Hubctl
 
     # Enterprise members and owners
     def enterprise_members(enterprise, options = {})
-      @client.paginate("/enterprises/#{enterprise}/members", options)
+      # GitHub Enterprise Cloud doesn't have /enterprises/{enterprise}/members
+      # Instead, we get members from the consumed-licenses endpoint (paginated)
+      all_users = []
+      page = 1
+      loop do
+        response = @client.get("/enterprises/#{enterprise}/consumed-licenses", per_page: 100, page: page)
+        users_in_page = response[:users] || []
+        all_users.concat(users_in_page)
+        
+        # Break if this page has fewer users than the max (indicating last page)
+        break if users_in_page.length < 100
+        page += 1
+        # Safety break to prevent infinite loops
+        break if page > 50
+      end
+      
+      # Filter based on role if specified
+      members = all_users
+      if options[:role]
+        case options[:role].downcase
+        when 'admin', 'owner'
+          members = members.select { |user| user[:github_com_enterprise_roles]&.include?("Owner") }
+        when 'member'
+          members = members.select { |user| user[:github_com_enterprise_roles]&.include?("Member") && !user[:github_com_enterprise_roles]&.include?("Owner") }
+        end
+      end
+      # If no role filter, include all users (members, owners, and outside collaborators)
+      
+      # Filter by two_factor_disabled if specified
+      if options[:two_factor_disabled]
+        members = members.select { |user| !user[:github_com_two_factor_auth] }
+      end
+      
+      # Transform to match expected format
+      members.map do |member|
+        roles = member[:github_com_enterprise_roles] || []
+        role = if roles.include?("Owner")
+                 'admin'
+               elsif roles.include?("Member")
+                 'member'
+               elsif roles.include?("Outside collaborator")
+                 'collaborator'
+               elsif roles.include?("Pending invitation")
+                 'pending'
+               else
+                 'unknown'
+               end
+        
+        {
+          login: member[:github_com_login],
+          id: nil, # Not provided in consumed-licenses endpoint
+          role: role,
+          email: member[:github_com_verified_domain_emails]&.first,
+          two_factor_disabled: !member[:github_com_two_factor_auth],
+          saml_identity: member[:github_com_saml_name_id] ? 'configured' : 'none',
+          avatar_url: nil # Not provided in consumed-licenses endpoint
+        }
+      end
     rescue Octokit::Error => e
       handle_api_error(e)
     end
 
     def enterprise_owners(enterprise, options = {})
-      @client.paginate("/enterprises/#{enterprise}/owners", options)
+      # GitHub Enterprise Cloud doesn't have /enterprises/{enterprise}/owners
+      # Instead, we get owners from the consumed-licenses endpoint (paginated)
+      all_users = []
+      page = 1
+      loop do
+        response = @client.get("/enterprises/#{enterprise}/consumed-licenses", per_page: 100, page: page)
+        users_in_page = response[:users] || []
+        all_users.concat(users_in_page)
+        
+        # Break if this page has fewer users than the max (indicating last page)
+        break if users_in_page.length < 100
+        page += 1
+        # Safety break to prevent infinite loops
+        break if page > 50
+      end
+      
+      # Filter for users who have "Owner" role in their enterprise roles
+      owners = all_users.select do |user|
+        user[:github_com_enterprise_roles]&.include?("Owner")
+      end
+      
+      # Transform to match expected format
+      owners.map do |owner|
+        {
+          login: owner[:github_com_login],
+          id: nil, # Not provided in consumed-licenses endpoint
+          email: owner[:github_com_verified_domain_emails]&.first,
+          two_factor_disabled: !owner[:github_com_two_factor_auth],
+          saml_identity: owner[:github_com_saml_name_id] ? 'configured' : 'none',
+          avatar_url: nil # Not provided in consumed-licenses endpoint
+        }
+      end
     rescue Octokit::Error => e
       handle_api_error(e)
     end
