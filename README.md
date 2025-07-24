@@ -41,7 +41,7 @@ chmod +x bin/hubctl
 gem build hubctl.gemspec
 
 # Install locally
-gem install hubctl-0.1.0.gem
+gem install hubctl-0.2.0.gem
 
 # Use globally
 hubctl --help
@@ -215,6 +215,186 @@ hubctl orgs teams myorg
 hubctl orgs info
 ```
 
+### Enterprise Management
+
+**Complete GitHub Enterprise Cloud management with billing insights, member administration, and security features.**
+
+#### Enterprise Overview
+
+```bash
+# Show detailed enterprise information
+hubctl enterprise show myenterprise
+
+# View enterprise statistics and metrics
+hubctl enterprise stats myenterprise
+```
+
+#### Enterprise Billing & Usage Analytics
+
+**Comprehensive billing breakdown with multiple output formats:**
+
+```bash
+# Detailed billing report (table format)
+hubctl enterprise billing myenterprise
+
+# JSON output for programmatic analysis
+hubctl enterprise billing myenterprise --format json
+
+# Tab-separated for shell processing
+hubctl enterprise billing myenterprise --format list
+```
+
+**Billing data includes:**
+- **GitHub Actions**: Total minutes, cost breakdown by runner type (Linux, Windows, macOS), usage percentages
+- **GitHub Packages**: Storage (GB-hours), data transfer (GB), associated costs
+- **GitHub Copilot**: User-months, subscription costs
+- **Total enterprise costs**: Aggregated across all services
+
+**Example JSON output for automation:**
+```json
+{
+  "enterprise": "myenterprise",
+  "total_cost": 8106.89,
+  "actions": {
+    "total_minutes": 682129,
+    "total_cost": 3285.33,
+    "runner_breakdown": {
+      "Actions Linux": {"minutes": 671583, "cost": 2844.82, "percentage": 98.5},
+      "Actions Windows": {"minutes": 3516, "cost": 10.42, "percentage": 0.5},
+      "Actions macOS 3-core": {"minutes": 2352, "cost": 32.48, "percentage": 0.3}
+    }
+  },
+  "packages": {"total_storage_gb_hours": 162.33, "total_cost": 0.0},
+  "copilot": {"total_user_months": 253.77, "total_cost": 4821.56}
+}
+```
+
+#### Enterprise Member & Owner Management
+
+**Complete user administration with role-based access:**
+
+```bash
+# List all enterprise members with role filtering
+hubctl enterprise members myenterprise
+hubctl enterprise members myenterprise --role=admin
+hubctl enterprise members myenterprise --role=member
+hubctl enterprise members myenterprise --two_factor_disabled
+
+# List enterprise owners
+hubctl enterprise owners myenterprise
+
+# Manage enterprise ownership
+hubctl enterprise add-owner myenterprise username
+hubctl enterprise remove-owner myenterprise username
+```
+
+**Member data includes:**
+- Login, email, role (Owner/Member/Outside collaborator)
+- Two-factor authentication status
+- SAML identity configuration
+- Organization membership details
+
+#### Enterprise Organization Management
+
+```bash
+# List organizations in enterprise
+hubctl enterprise organizations myenterprise
+
+# Create new organization in enterprise
+hubctl enterprise create-org myenterprise neworg \
+  --display-name="New Organization" \
+  --description="Organization description" \
+  --billing-email=billing@company.com
+```
+
+#### Enterprise Security & Compliance
+
+**SAML SSO Authorization Management:**
+
+```bash
+# List SAML SSO authorizations
+hubctl enterprise saml-sso list myenterprise
+
+# Show specific user's SAML authorization
+hubctl enterprise saml-sso show myenterprise username
+
+# Remove SAML SSO authorization (with confirmation)
+hubctl enterprise saml-sso remove myenterprise username
+```
+
+**Security Analysis Settings:**
+
+```bash
+# View current security settings
+hubctl enterprise security myenterprise
+
+# Enable security features for new repositories
+hubctl enterprise security myenterprise \
+  --dependency-graph-enabled-for-new-repositories \
+  --secret-scanning-enabled-for-new-repositories \
+  --secret-scanning-push-protection-enabled-for-new-repositories
+```
+
+**Audit Log Access:**
+
+```bash
+# View enterprise audit log
+hubctl enterprise audit-log myenterprise
+
+# Filter audit log by phrase and time range
+hubctl enterprise audit-log myenterprise \
+  --phrase="repository.create" \
+  --after="2024-01-01T00:00:00Z" \
+  --before="2024-12-31T23:59:59Z"
+```
+
+#### Enterprise Automation Examples
+
+**Billing Analysis Script:**
+```bash
+#!/bin/bash
+# Monthly billing report
+ENTERPRISE="myenterprise"
+REPORT_DATE=$(date +"%Y-%m")
+
+echo "Enterprise Billing Report - $REPORT_DATE"
+echo "========================================"
+
+# Get billing data in JSON for processing
+BILLING_DATA=$(hubctl enterprise billing $ENTERPRISE --format json)
+
+# Extract key metrics
+TOTAL_COST=$(echo "$BILLING_DATA" | jq -r '.total_cost')
+ACTIONS_MINUTES=$(echo "$BILLING_DATA" | jq -r '.actions.total_minutes')
+COPILOT_USERS=$(echo "$BILLING_DATA" | jq -r '.copilot.total_user_months')
+
+echo "Total Cost: \$${TOTAL_COST}"
+echo "Actions Minutes: ${ACTIONS_MINUTES}"
+echo "Copilot User-Months: ${COPILOT_USERS}"
+
+# Runner type breakdown
+echo -e "\nRunner Usage:"
+echo "$BILLING_DATA" | jq -r '.actions.runner_breakdown | to_entries[] | "\(.key): \(.value.minutes) minutes (\(.value.percentage)%)"'
+```
+
+**Member Audit Script:**
+```bash
+#!/bin/bash
+# Security audit: Find users with 2FA disabled
+ENTERPRISE="myenterprise"
+
+echo "Security Audit: Users without 2FA"
+echo "================================"
+
+# Get members without 2FA in list format for processing
+hubctl enterprise members $ENTERPRISE --two_factor_disabled --format list | \
+while IFS=$'\t' read -r login role email two_factor_disabled saml_identity; do
+    echo "⚠️  $login ($role) - Email: $email"
+done
+
+echo -e "\nRecommendation: Enable 2FA requirement in organization settings"
+```
+
 ### Output Format Examples
 
 hubctl supports three output formats optimized for different use cases:
@@ -372,9 +552,14 @@ hubctl/
 │       ├── users.rb             # User management commands
 │       ├── teams.rb             # Team management commands
 │       ├── repos.rb             # Repository management commands
-│       └── orgs.rb              # Organization management commands
+│       ├── orgs.rb              # Organization management commands
+│       └── enterprise.rb        # Enterprise management commands
+├── spec/                         # Test suite
+├── docs/                         # Documentation
 ├── hubctl.gemspec               # Gem specification
 ├── Gemfile                      # Dependencies
+├── Rakefile                     # Build tasks
+├── TESTING.md                   # Testing documentation
 └── README.md                    # This file
 ```
 
@@ -477,19 +662,7 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v0.1.0 (Latest)
-
-- ✅ Complete GitHub API integration with Octokit
-- ✅ Multiple output formats (table, JSON, list)
-- ✅ Interactive prompts and confirmations
-- ✅ Comprehensive error handling
-- ✅ Colored output and loading spinners
-- ✅ Configuration management system
-- ✅ Full user, team, repository, and organization management
-- ✅ Repository topics management
-- ✅ Batch operations support
-- ✅ Authentication status checking
-- ✅ Rate limit monitoring
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
 ## Examples in Action
 

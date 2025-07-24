@@ -1,5 +1,5 @@
 {
-  description = "hubctl - A comprehensive GitHub administration CLI";
+  description = "hubctl - A comprehensive GitHub administration CLI with Enterprise management";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -17,7 +17,7 @@
         # Package that works both locally and remotely
         hubctl = pkgs.stdenv.mkDerivation rec {
           pname = "hubctl";
-          version = "0.1.0";
+          version = "0.2.0";
 
           src = ./.;
 
