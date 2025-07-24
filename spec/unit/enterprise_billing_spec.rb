@@ -14,7 +14,8 @@ RSpec.describe Hubctl::Enterprise, '#billing' do
       info: nil,
       success: nil,
       error: nil,
-      output: nil
+      output: nil,
+      json?: false
     )
     allow(enterprise_command).to receive(:formatter).and_return(@mock_formatter)
     
@@ -23,145 +24,119 @@ RSpec.describe Hubctl::Enterprise, '#billing' do
   end
 
   describe 'when fetching billing information successfully' do
-    before do
-      # Stub all the billing API calls with sample data
-      allow(mock_github_client).to receive(:enterprise_consumed_licenses)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_consumed_licenses_payload)
-      
-      allow(mock_github_client).to receive(:enterprise_actions_billing)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_actions_billing_payload)
-      
-      allow(mock_github_client).to receive(:enterprise_packages_billing)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_packages_billing_payload)
-      
-      allow(mock_github_client).to receive(:enterprise_shared_storage_billing)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_storage_billing_payload)
-    end
-
-    it 'displays license consumption information' do
-      enterprise_command.billing(enterprise_name)
-      
-      expect(@mock_formatter).to have_received(:info).with('=== Enterprise License Consumption ===')
-      expect(@mock_formatter).to have_received(:info).with('Total seats: 95/100')
-      expect(@mock_formatter).to have_received(:info).with('Active users: 85')
-    end
-
-    it 'displays GitHub Actions billing with corrected labels' do
-      enterprise_command.billing(enterprise_name)
-      
-      expect(@mock_formatter).to have_received(:info).with("\n=== GitHub Actions Billing ===")
-      expect(@mock_formatter).to have_received(:info).with('Total minutes used: 15000')
-      expect(@mock_formatter).to have_received(:info).with('Paid minutes used: 5000')
-      expect(@mock_formatter).to have_received(:info).with('Included free minutes: 10000')
-      expect(@mock_formatter).to have_received(:info).with('Percentage of included minutes used: 150.0%')
-    end
-
-    it 'displays runner breakdown with corrected labels' do
-      enterprise_command.billing(enterprise_name)
-      
-      expect(@mock_formatter).to have_received(:info).with('Minutes used by runner type:')
-      expect(@mock_formatter).to have_received(:info).with('  Ubuntu: 8000')
-      expect(@mock_formatter).to have_received(:info).with('  Windows: 4000')
-      expect(@mock_formatter).to have_received(:info).with('  Macos: 3000')
-    end
-
-    it 'displays packages billing information' do
-      enterprise_command.billing(enterprise_name)
-      
-      expect(@mock_formatter).to have_received(:info).with("\n=== Packages Billing ===")
-      expect(@mock_formatter).to have_received(:info).with('Total gigabytes bandwidth used: 500')
-      expect(@mock_formatter).to have_received(:info).with('Total paid gigabytes bandwidth used: 100')
-      expect(@mock_formatter).to have_received(:info).with('Included gigabytes bandwidth: 400')
-    end
-
-    it 'displays shared storage billing information' do
-      enterprise_command.billing(enterprise_name)
-      
-      expect(@mock_formatter).to have_received(:info).with("\n=== Shared Storage Billing ===")
-      expect(@mock_formatter).to have_received(:info).with('Days left in billing cycle: 15')
-      expect(@mock_formatter).to have_received(:info).with('Estimated paid storage for month: 25 GB')
-      expect(@mock_formatter).to have_received(:info).with('Estimated storage usage: 125 GB')
-    end
-  end
-
-  describe 'when some billing APIs fail' do
-    before do
-      allow(mock_github_client).to receive(:enterprise_consumed_licenses)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_consumed_licenses_payload)
-      
-      # Actions billing succeeds
-      allow(mock_github_client).to receive(:enterprise_actions_billing)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_actions_billing_payload)
-      
-      # Packages billing fails
-      allow(mock_github_client).to receive(:enterprise_packages_billing)
-        .with(enterprise_name)
-        .and_raise(StandardError.new('API Error'))
-      
-      # Storage billing fails
-      allow(mock_github_client).to receive(:enterprise_shared_storage_billing)
-        .with(enterprise_name)
-        .and_raise(StandardError.new('API Error'))
-    end
-
-    it 'continues processing and shows available data' do
-      enterprise_command.billing(enterprise_name)
-      
-      # Should still show license and actions billing
-      expect(@mock_formatter).to have_received(:info).with('=== Enterprise License Consumption ===')
-      expect(@mock_formatter).to have_received(:info).with("\n=== GitHub Actions Billing ===")
-      
-      # Should not show packages or storage billing sections
-      expect(@mock_formatter).not_to have_received(:info).with("\n=== Packages Billing ===")
-      expect(@mock_formatter).not_to have_received(:info).with("\n=== Shared Storage Billing ===")
-    end
-  end
-
-  describe 'when actions billing returns empty breakdown' do
-    let(:empty_actions_billing) do
+    let(:sample_usage_items_payload) do
       {
-        total_minutes_used: 5000,
-        total_paid_minutes_used: 1000,
-        included_minutes: 10000,
-        minutes_used_breakdown: {}
+        usageItems: [
+          {
+            product: 'actions',
+            sku: 'Actions Linux',
+            unitType: 'Minutes', 
+            quantity: 1000,
+            netAmount: 8.0
+          },
+          {
+            product: 'actions',
+            sku: 'Actions Windows',
+            unitType: 'Minutes',
+            quantity: 500,
+            netAmount: 8.0
+          },
+          {
+            product: 'packages',
+            sku: 'packages-storage',
+            unitType: 'GB-hours',
+            quantity: 100,
+            netAmount: 2.0
+          },
+          {
+            product: 'copilot',
+            sku: 'copilot-business',
+            unitType: 'user-months',
+            quantity: 10,
+            netAmount: 190.0
+          }
+        ]
       }
     end
 
     before do
-      allow(mock_github_client).to receive(:enterprise_consumed_licenses)
-        .with(enterprise_name)
-        .and_return(sample_enterprise_consumed_licenses_payload)
-      
       allow(mock_github_client).to receive(:enterprise_actions_billing)
         .with(enterprise_name)
-        .and_return(empty_actions_billing)
-      
-      allow(mock_github_client).to receive(:enterprise_packages_billing)
-        .with(enterprise_name)
-        .and_return(nil)
-      
-      allow(mock_github_client).to receive(:enterprise_shared_storage_billing)
-        .with(enterprise_name)
-        .and_return(nil)
+        .and_return(sample_usage_items_payload)
     end
 
-    it 'shows actions billing without runner breakdown' do
+    context 'when output format is table (default)' do
+      it 'outputs flattened billing data as table' do
+        enterprise_command.billing(enterprise_name)
+        
+        expect(@mock_formatter).to have_received(:output).with(
+          array_including(
+            hash_including(category: 'Enterprise', metric: 'Name', value: enterprise_name),
+            hash_including(category: 'Enterprise', metric: 'Total Cost', value: '$208.0'),
+            hash_including(category: 'Actions', metric: 'Total Minutes', value: '1500'),
+            hash_including(category: 'Actions', metric: 'Total Cost', value: '$16.0'),
+            hash_including(category: 'Actions - Actions Linux', metric: 'Minutes (Share)', value: '1000 (0%)'),
+            hash_including(category: 'Actions - Actions Linux', metric: 'Cost', value: '$8.0'),
+            hash_including(category: 'Actions - Actions Windows', metric: 'Minutes (Share)', value: '500 (0%)'),
+            hash_including(category: 'Actions - Actions Windows', metric: 'Cost', value: '$8.0'),
+            hash_including(category: 'Packages', metric: 'Storage (GB-hours)', value: '100'),
+            hash_including(category: 'Packages', metric: 'Data Transfer (GB)', value: '0'),
+            hash_including(category: 'Packages', metric: 'Total Cost', value: '$2.0'),
+            hash_including(category: 'Copilot', metric: 'User-Months', value: '10'),
+            hash_including(category: 'Copilot', metric: 'Total Cost', value: '$190.0')
+          ),
+          headers: %w[category metric value]
+        )
+      end
+    end
+
+    context 'when output format is JSON' do
+      before do
+        allow(@mock_formatter).to receive(:json?).and_return(true)
+      end
+
+      it 'outputs structured billing data as JSON' do
+        enterprise_command.billing(enterprise_name)
+        
+        expect(@mock_formatter).to have_received(:output).with(
+          hash_including(
+            enterprise: enterprise_name,
+            total_cost: 208.0,
+            actions: hash_including(
+              total_minutes: 1500,
+              total_cost: 16.0,
+              runner_breakdown: hash_including(
+                'Actions Linux' => hash_including(minutes: 1000, cost: 8.0),
+                'Actions Windows' => hash_including(minutes: 500, cost: 8.0)
+              )
+            ),
+            packages: hash_including(
+              total_cost: 2.0,
+              total_storage_gb_hours: 100,
+              total_data_transfer_gb: 0
+            ),
+            copilot: hash_including(
+              total_cost: 190.0,
+              total_user_months: 10
+            )
+          )
+        )
+      end
+    end
+  end
+
+  describe 'when no usage data is available' do
+    before do
+      allow(mock_github_client).to receive(:enterprise_actions_billing)
+        .with(enterprise_name)
+        .and_return({ usageItems: [] })
+    end
+
+    it 'shows no billing data message and returns early' do
       enterprise_command.billing(enterprise_name)
       
-      expect(@mock_formatter).to have_received(:info).with("\n=== GitHub Actions Billing ===")
-      expect(@mock_formatter).to have_received(:info).with('Total minutes used: 5000')
-      expect(@mock_formatter).to have_received(:info).with('Paid minutes used: 1000')
-      expect(@mock_formatter).to have_received(:info).with('Included free minutes: 10000')
-      expect(@mock_formatter).to have_received(:info).with('Percentage of included minutes used: 50.0%')
-      
-      # Should not show empty breakdown
-      expect(@mock_formatter).not_to have_received(:info).with('Minutes used by runner type:')
+      expect(@mock_formatter).to have_received(:info).with("No billing usage data found for enterprise #{enterprise_name}")
+      expect(@mock_formatter).not_to have_received(:output)
     end
   end
 
@@ -184,8 +159,8 @@ RSpec.describe Hubctl::Enterprise, '#billing' do
     before do
       setup_authenticated_client
       
-      # Mock all billing methods to raise API error
-      allow(mock_github_client).to receive(:enterprise_consumed_licenses)
+      # Mock billing method to raise API error
+      allow(mock_github_client).to receive(:enterprise_actions_billing)
         .with(enterprise_name)
         .and_raise(Hubctl::GitHubClient::APIError.new('API request failed'))
       
