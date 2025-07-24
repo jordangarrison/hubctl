@@ -41,7 +41,7 @@ chmod +x bin/hubctl
 gem build hubctl.gemspec
 
 # Install locally
-gem install hubctl-0.2.0.gem
+gem install hubctl-0.2.1.gem
 
 # Use globally
 hubctl --help
