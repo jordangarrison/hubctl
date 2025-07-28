@@ -65,12 +65,12 @@ module Hubctl
       end
     end
 
-    desc 'invite EMAIL', 'Invite user to organization'
+    desc 'invite EMAIL_OR_USERNAME', 'Invite user to organization by email or GitHub username'
     method_option :org, type: :string, desc: 'Organization name'
     method_option :role, type: :string, default: 'direct_member',
                   desc: 'Role for invited user (direct_member, admin, billing_manager)'
     method_option :team_ids, type: :array, desc: 'Team IDs to add user to'
-    def invite(email)
+    def invite(email_or_username)
       ensure_authenticated!
       org = require_org!
 
@@ -79,10 +79,10 @@ module Hubctl
         invitation_options[:team_ids] = options[:team_ids] if options[:team_ids]
 
         invitation = with_spinner("Sending invitation") do
-          github_client.invite_user_to_org(org, email, invitation_options)
+          github_client.invite_user_to_org(org, email_or_username, invitation_options)
         end
 
-        formatter.success("Invitation sent to #{email}")
+        formatter.success("Invitation sent to #{email_or_username}")
         formatter.info("Role: #{options[:role]}")
         formatter.info("Invitation ID: #{invitation[:id]}")
 

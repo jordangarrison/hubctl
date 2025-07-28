@@ -81,8 +81,16 @@ module Hubctl
       handle_api_error(e)
     end
 
-    def invite_user_to_org(org, username, options = {})
-      @client.invite_user_to_org(org, username, options)
+    def invite_user_to_org(org, email_or_username, options = {})
+      # Check if the input looks like an email address
+      if email_or_username.include?('@')
+        # Invite by email
+        @client.post("/orgs/#{org}/invitations", { email: email_or_username }.merge(options))
+      else
+        # Invite by username - first get the user ID
+        user_info = @client.user(email_or_username)
+        @client.post("/orgs/#{org}/invitations", { invitee_id: user_info[:id] }.merge(options))
+      end
     rescue Octokit::Error => e
       handle_api_error(e)
     end
@@ -113,7 +121,14 @@ module Hubctl
     end
 
     def add_team_member(team_id, username, options = {})
-      @client.add_team_member(team_id, username, options)
+      # First, get the team info to find the org and team_slug for the newer endpoint
+      team_info = @client.team(team_id)
+      org = team_info[:organization][:login]
+      team_slug = team_info[:slug]
+      
+      # Use the newer org-based endpoint which can invite users to org and add to team
+      # This is equivalent to octokit.js addOrUpdateMembershipForUserInOrg
+      @client.put("/orgs/#{org}/teams/#{team_slug}/memberships/#{username}", options)
     rescue Octokit::Error => e
       handle_api_error(e)
     end
@@ -422,7 +437,9 @@ module Hubctl
       when Octokit::TooManyRequests
         raise APIError, "Rate limit exceeded. Please try again later."
       when Octokit::UnprocessableEntity
-        message = error.errors&.map { |e| e[:message] }&.join(', ') || error.message
+        # Extract meaningful error messages, handling cases where individual error messages are nil
+        error_messages = error.errors&.map { |e| e[:message] }&.compact&.reject(&:empty?) || []
+        message = error_messages.any? ? error_messages.join(', ') : error.message
         raise APIError, "Request failed: #{message}"
       else
         raise APIError, "GitHub API error: #{error.message}"
