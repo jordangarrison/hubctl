@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-07-28
+
+### Added
+- **Username support for organization invitations** - `hubctl users invite` now accepts both email addresses and GitHub usernames
+- **Direct team member invitations** - Users can now be added to teams directly without requiring prior organization membership
+- **Automatic organization invitations** - Adding users to teams automatically invites them to the organization if needed
+
+### Changed
+- **Team membership API** - Switched from legacy team member endpoint to modern org-based membership endpoint
+- **CLI help text** - Updated `users invite` command description to reflect email/username support
+- **Error handling** - Improved error message extraction for GitHub API responses with nil error messages
+
+### Fixed
+- **Team member addition workflow** - Resolved "User isn't a member of this organization" error when adding new users to teams
+- **Empty error messages** - Fixed issue where GitHub API errors with nil messages would display empty error text
+- **Invitation method compatibility** - Brought hubctl team management functionality in line with ghadmin behavior
+
+### Technical Details
+- Updated `invite_user_to_org` method to automatically detect email vs username and handle user ID lookup
+- Migrated `add_team_member` to use `PUT /orgs/{org}/teams/{team_slug}/memberships/{username}` endpoint
+- Enhanced error handling for `Octokit::UnprocessableEntity` errors with improved message extraction
+- Added automatic team info lookup to determine organization and team slug for API calls
+
 ## [0.2.1] - 2025-07-24
 
 ### Fixed

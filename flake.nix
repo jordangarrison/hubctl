@@ -30,7 +30,7 @@
         # Main package
         hubctl = pkgs.stdenv.mkDerivation {
           pname = "hubctl";
-          version = "0.2.1";
+          version = "0.3.0";
           src = self;
           
           buildInputs = [ gems ];
