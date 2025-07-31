@@ -17,6 +17,83 @@ A **comprehensive, production-ready CLI tool** for GitHub administration with re
 
 ## Installation
 
+### Via Devbox
+
+If you have [Devbox](https://www.jetify.com/devbox/docs/installing_devbox/) installed:
+
+```bash
+devbox add github:jordangarrison/hubctl
+devbox shell
+hubctl --help
+```
+
+### Via Nix Flake
+
+If you have Nix installed with flakes enabled:
+
+```bash
+# Install directly from GitHub
+nix profile install github:jordangarrison/hubctl
+
+# Or run without installing
+nix run github:jordangarrison/hubctl -- --help
+
+# For development
+git clone <repository-url>
+cd hubctl
+nix develop  # Enter development shell with all dependencies
+```
+
+#### Using as a Flake Input
+
+Add hubctl to your `flake.nix` inputs:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    hubctl.url = "github:jordangarrison/hubctl";
+  };
+
+  outputs = { self, nixpkgs, hubctl }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in {
+      # For development shells
+      devShells.${system}.default = pkgs.mkShell {
+        buildInputs = [
+          hubctl.packages.${system}.default
+        ];
+      };
+      
+      # For NixOS system configuration
+      nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [
+          {
+            environment.systemPackages = [
+              hubctl.packages.${system}.default
+            ];
+          }
+        ];
+      };
+      
+      # For Home Manager
+      homeConfigurations.youruser = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          {
+            home.packages = [
+              hubctl.packages.${system}.default
+            ];
+          }
+        ];
+      };
+    };
+}
+```
+
 ### Local Development
 
 ```bash
