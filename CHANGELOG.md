@@ -5,24 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-01-27
+
+### Changed
+
+- **Code quality improvements** - Comprehensive RuboCop compliance fixes including style, complexity, and maintainability enhancements
+- **Method refactoring** - Reduced ABC complexity and method lengths in GitHubClient for better maintainability
+- **Documentation** - Added class-level documentation for GitHubClient
+- **Nix packaging** - Fixed flake.nix formatting and nokogiri dependency reference
+
+### Fixed
+
+- **Style compliance** - Resolved 41 RuboCop offenses including guard clauses, string literals, and line length violations
+- **Code complexity** - Refactored enterprise_members, enterprise_owners, and handle_api_error methods to reduce cyclomatic complexity
+- **Error handling** - Improved method extraction and single responsibility adherence
+
 ## [0.3.0] - 2025-07-28
 
 ### Added
+
 - **Username support for organization invitations** - `hubctl users invite` now accepts both email addresses and GitHub usernames
 - **Direct team member invitations** - Users can now be added to teams directly without requiring prior organization membership
 - **Automatic organization invitations** - Adding users to teams automatically invites them to the organization if needed
 
 ### Changed
+
 - **Team membership API** - Switched from legacy team member endpoint to modern org-based membership endpoint
 - **CLI help text** - Updated `users invite` command description to reflect email/username support
 - **Error handling** - Improved error message extraction for GitHub API responses with nil error messages
 
 ### Fixed
+
 - **Team member addition workflow** - Resolved "User isn't a member of this organization" error when adding new users to teams
 - **Empty error messages** - Fixed issue where GitHub API errors with nil messages would display empty error text
 - **Invitation method compatibility** - Brought hubctl team management functionality in line with ghadmin behavior
 
 ### Technical Details
+
 - Updated `invite_user_to_org` method to automatically detect email vs username and handle user ID lookup
 - Migrated `add_team_member` to use `PUT /orgs/{org}/teams/{team_slug}/memberships/{username}` endpoint
 - Enhanced error handling for `Octokit::UnprocessableEntity` errors with improved message extraction
@@ -31,11 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] - 2025-07-24
 
 ### Fixed
+
 - **Nix build compatibility** - Resolved network access issues during Nix build process
 - **Gem dependency hashing** - Fixed gem hash mismatches that prevented successful builds in Nix environment
 - **Build reproducibility** - Improved consistency of builds across different environments
 
 ### Technical Details
+
 - Updated `flake.nix` and related Nix configuration for better network handling
 - Resolved gem dependency conflicts that affected build determinism
 - Enhanced build process documentation for Nix-based development workflows
@@ -45,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 **🏢 Enterprise Management Features:**
+
 - **Complete GitHub Enterprise Cloud support** with comprehensive billing analytics
 - **Enterprise billing insights** - Actions, Packages, Copilot usage with cost breakdowns by runner type
 - **Member & owner management** - Role-based access control with 2FA monitoring and SAML identity tracking
@@ -56,21 +78,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Enterprise statistics & metrics** - Comprehensive reporting capabilities including repository, user, and team counts
 
 **🔧 Core Improvements:**
+
 - **Enhanced formatter system** - Added `json?` detection method for format-aware output
 - **Improved output formatting** - Better handling of nested data structures in table vs JSON output
 - **GitHub Enterprise Cloud API compatibility** - Full support for Cloud vs Server API differences
 
 ### Changed
+
 - **Enterprise billing output** - Now provides structured JSON for automation and flattened table for human readability
 - **Paginated API calls** - Improved handling of large result sets for enterprise member and owner commands
 - **Error handling** - Better error messages for Enterprise Cloud specific endpoints
 
 ### Fixed
+
 - **Format detection** - Fixed issue where `--format json` was not properly detected in subcommands
 - **Percentage calculations** - Corrected runner type usage percentage calculations in billing reports
 - **API endpoint compatibility** - Updated to use correct Enterprise Cloud endpoints vs deprecated Server endpoints
 
 ### Technical Details
+
 - Added `lib/hubctl/enterprise.rb` with comprehensive enterprise management commands
 - Enhanced `lib/hubctl/formatter.rb` with `json?` method for format detection
 - Updated test suite with new enterprise-specific test cases
@@ -80,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2025-07-22
 
 ### Added
+
 - **Complete GitHub API integration** with Octokit
 - **Multiple output formats** - Table, JSON, and list formats with colored output
 - **Interactive prompts and confirmations** - TTY-Prompt powered user interactions
@@ -96,6 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rate limit monitoring** - Automatic handling of GitHub API rate limits
 
 ### Technical Foundation
+
 - **Thor-based CLI framework** with structured subcommands
 - **Octokit GitHub API client** with comprehensive API coverage
 - **TTY gem suite integration** for beautiful terminal interfaces
@@ -110,7 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 This project follows [Semantic Versioning](https://semver.org/):
 
 - **MAJOR** version when you make incompatible API changes
-- **MINOR** version when you add functionality in a backwards compatible manner  
+- **MINOR** version when you add functionality in a backwards compatible manner
 - **PATCH** version when you make backwards compatible bug fixes
 
 ## Release Process

@@ -4,6 +4,9 @@ require 'octokit'
 require 'pastel'
 
 module Hubctl
+  # GitHub API client wrapper with enterprise functionality
+  # Provides methods for managing GitHub organizations, repositories, teams,
+  # users, and enterprise features with proper error handling and pagination.
   class GitHubClient
     class AuthenticationError < StandardError; end
     class APIError < StandardError; end
@@ -46,12 +49,12 @@ module Hubctl
       if response.respond_to?(:attrs) && response.attrs[:rels] && response.attrs[:rels][:self]
         # This method doesn't reliably provide scopes, so let's use a simpler approach
         return ['repo', 'user', 'admin:org', 'read:org'] # Common scopes - we'll refine this
-      else
-        return ['unknown']
       end
+
+      ['unknown']
     rescue Octokit::Error => e
       handle_api_error(e)
-    rescue => e
+    rescue StandardError
       ['error retrieving scopes']
     end
 
@@ -125,7 +128,7 @@ module Hubctl
       team_info = @client.team(team_id)
       org = team_info[:organization][:login]
       team_slug = team_info[:slug]
-      
+
       # Use the newer org-based endpoint which can invite users to org and add to team
       # This is equivalent to octokit.js addOrUpdateMembershipForUserInOrg
       @client.put("/orgs/#{org}/teams/#{team_slug}/memberships/#{username}", options)
@@ -185,18 +188,18 @@ module Hubctl
       # For Enterprise Cloud, we get enterprise info through the primary org
       # This is a workaround since /enterprises/{enterprise} doesn't exist in Enterprise Cloud
       org_data = @client.organization(enterprise)
-      if org_data.plan.name == 'enterprise'
-        {
-          login: enterprise,
-          name: org_data.name,
-          description: org_data.description,
-          plan: org_data.plan.name,
-          created_at: org_data.created_at,
-          updated_at: org_data.updated_at
-        }
-      else
+      unless org_data.plan.name == 'enterprise'
         raise APIError, "Organization #{enterprise} is not an enterprise account"
       end
+
+      {
+        login: enterprise,
+        name: org_data.name,
+        description: org_data.description,
+        plan: org_data.plan.name,
+        created_at: org_data.created_at,
+        updated_at: org_data.updated_at
+      }
     rescue Octokit::Error => e
       handle_api_error(e)
     end
@@ -215,101 +218,17 @@ module Hubctl
 
     # Enterprise members and owners
     def enterprise_members(enterprise, options = {})
-      # GitHub Enterprise Cloud doesn't have /enterprises/{enterprise}/members
-      # Instead, we get members from the consumed-licenses endpoint (paginated)
-      all_users = []
-      page = 1
-      loop do
-        response = @client.get("/enterprises/#{enterprise}/consumed-licenses", per_page: 100, page: page)
-        users_in_page = response[:users] || []
-        all_users.concat(users_in_page)
-        
-        # Break if this page has fewer users than the max (indicating last page)
-        break if users_in_page.length < 100
-        page += 1
-        # Safety break to prevent infinite loops
-        break if page > 50
-      end
-      
-      # Filter based on role if specified
-      members = all_users
-      if options[:role]
-        case options[:role].downcase
-        when 'admin', 'owner'
-          members = members.select { |user| user[:github_com_enterprise_roles]&.include?("Owner") }
-        when 'member'
-          members = members.select { |user| user[:github_com_enterprise_roles]&.include?("Member") && !user[:github_com_enterprise_roles]&.include?("Owner") }
-        end
-      end
-      # If no role filter, include all users (members, owners, and outside collaborators)
-      
-      # Filter by two_factor_disabled if specified
-      if options[:two_factor_disabled]
-        members = members.select { |user| !user[:github_com_two_factor_auth] }
-      end
-      
-      # Transform to match expected format
-      members.map do |member|
-        roles = member[:github_com_enterprise_roles] || []
-        role = if roles.include?("Owner")
-                 'admin'
-               elsif roles.include?("Member")
-                 'member'
-               elsif roles.include?("Outside collaborator")
-                 'collaborator'
-               elsif roles.include?("Pending invitation")
-                 'pending'
-               else
-                 'unknown'
-               end
-        
-        {
-          login: member[:github_com_login],
-          id: nil, # Not provided in consumed-licenses endpoint
-          role: role,
-          email: member[:github_com_verified_domain_emails]&.first,
-          two_factor_disabled: !member[:github_com_two_factor_auth],
-          saml_identity: member[:github_com_saml_name_id] ? 'configured' : 'none',
-          avatar_url: nil # Not provided in consumed-licenses endpoint
-        }
-      end
+      all_users = fetch_all_enterprise_users(enterprise)
+      members = filter_members_by_options(all_users, options)
+      members.map { |member| transform_member_data(member) }
     rescue Octokit::Error => e
       handle_api_error(e)
     end
 
-    def enterprise_owners(enterprise, options = {})
-      # GitHub Enterprise Cloud doesn't have /enterprises/{enterprise}/owners
-      # Instead, we get owners from the consumed-licenses endpoint (paginated)
-      all_users = []
-      page = 1
-      loop do
-        response = @client.get("/enterprises/#{enterprise}/consumed-licenses", per_page: 100, page: page)
-        users_in_page = response[:users] || []
-        all_users.concat(users_in_page)
-        
-        # Break if this page has fewer users than the max (indicating last page)
-        break if users_in_page.length < 100
-        page += 1
-        # Safety break to prevent infinite loops
-        break if page > 50
-      end
-      
-      # Filter for users who have "Owner" role in their enterprise roles
-      owners = all_users.select do |user|
-        user[:github_com_enterprise_roles]&.include?("Owner")
-      end
-      
-      # Transform to match expected format
-      owners.map do |owner|
-        {
-          login: owner[:github_com_login],
-          id: nil, # Not provided in consumed-licenses endpoint
-          email: owner[:github_com_verified_domain_emails]&.first,
-          two_factor_disabled: !owner[:github_com_two_factor_auth],
-          saml_identity: owner[:github_com_saml_name_id] ? 'configured' : 'none',
-          avatar_url: nil # Not provided in consumed-licenses endpoint
-        }
-      end
+    def enterprise_owners(enterprise, _options = {})
+      all_users = fetch_all_enterprise_users(enterprise)
+      owners = filter_owners(all_users)
+      owners.map { |owner| transform_member_data(owner) }
     rescue Octokit::Error => e
       handle_api_error(e)
     end
@@ -422,6 +341,82 @@ module Hubctl
 
     private
 
+    def fetch_all_enterprise_users(enterprise)
+      all_users = []
+      page = 1
+      loop do
+        response = @client.get("/enterprises/#{enterprise}/consumed-licenses", per_page: 100,
+                                                                               page: page)
+        users_in_page = response[:users] || []
+        all_users.concat(users_in_page)
+
+        break if users_in_page.length < 100
+
+        page += 1
+        break if page > 50 # Safety break
+      end
+      all_users
+    end
+
+    def filter_members_by_options(users, options)
+      members = users
+
+      members = filter_by_role(members, options[:role]) if options[:role]
+
+      if options[:two_factor_disabled]
+        members = members.reject { |user| user[:github_com_two_factor_auth] }
+      end
+
+      members
+    end
+
+    def filter_by_role(members, role)
+      case role.downcase
+      when 'admin', 'owner'
+        filter_owners(members)
+      when 'member'
+        members.select do |user|
+          roles = user[:github_com_enterprise_roles]
+          roles&.include?('Member') && !roles&.include?('Owner')
+        end
+      else
+        members
+      end
+    end
+
+    def filter_owners(users)
+      users.select { |user| user[:github_com_enterprise_roles]&.include?('Owner') }
+    end
+
+    def transform_member_data(member)
+      roles = member[:github_com_enterprise_roles] || []
+      role = determine_user_role(roles)
+
+      {
+        login: member[:github_com_login],
+        id: nil,
+        role: role,
+        email: member[:github_com_verified_domain_emails]&.first,
+        two_factor_disabled: !member[:github_com_two_factor_auth],
+        saml_identity: member[:github_com_saml_name_id] ? 'configured' : 'none',
+        avatar_url: nil
+      }
+    end
+
+    def determine_user_role(roles)
+      if roles.include?('Owner')
+        'admin'
+      elsif roles.include?('Member')
+        'member'
+      elsif roles.include?('Outside collaborator')
+        'collaborator'
+      elsif roles.include?('Pending invitation')
+        'pending'
+      else
+        'unknown'
+      end
+    end
+
     def github_token
       @token || ENV['GITHUB_TOKEN'] || Config.get('github_token')
     end
@@ -429,21 +424,48 @@ module Hubctl
     def handle_api_error(error)
       case error
       when Octokit::Unauthorized
-        raise AuthenticationError, "GitHub authentication failed. Please check your token."
+        handle_unauthorized_error
       when Octokit::NotFound
-        raise APIError, "Resource not found. Please check the name and your permissions."
+        handle_not_found_error
       when Octokit::Forbidden
-        raise APIError, "Access forbidden. You may not have the required permissions."
+        handle_forbidden_error
       when Octokit::TooManyRequests
-        raise APIError, "Rate limit exceeded. Please try again later."
+        handle_rate_limit_error
       when Octokit::UnprocessableEntity
-        # Extract meaningful error messages, handling cases where individual error messages are nil
-        error_messages = error.errors&.map { |e| e[:message] }&.compact&.reject(&:empty?) || []
-        message = error_messages.any? ? error_messages.join(', ') : error.message
-        raise APIError, "Request failed: #{message}"
+        handle_unprocessable_entity_error(error)
       else
-        raise APIError, "GitHub API error: #{error.message}"
+        handle_generic_api_error(error)
       end
+    end
+
+    def handle_unauthorized_error
+      raise AuthenticationError, 'GitHub authentication failed. Please check your token.'
+    end
+
+    def handle_not_found_error
+      raise APIError, 'Resource not found. Please check the name and your permissions.'
+    end
+
+    def handle_forbidden_error
+      raise APIError, 'Access forbidden. You may not have the required permissions.'
+    end
+
+    def handle_rate_limit_error
+      raise APIError, 'Rate limit exceeded. Please try again later.'
+    end
+
+    def handle_unprocessable_entity_error(error)
+      error_messages = extract_error_messages(error)
+      message = error_messages.any? ? error_messages.join(', ') : error.message
+      raise APIError, "Request failed: #{message}"
+    end
+
+    def handle_generic_api_error(error)
+      raise APIError, "GitHub API error: #{error.message}"
+    end
+
+    def extract_error_messages(error)
+      error.errors&.map { |e| e[:message] }&.compact&.reject(&:empty?) || []
     end
   end
 end
