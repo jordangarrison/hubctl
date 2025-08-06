@@ -18,11 +18,11 @@
           gemfile = ./Gemfile;
           lockfile = ./Gemfile.lock;
           gemset = ./gemset.nix;
-          
+
           # Override problematic gems with nixpkgs versions
           gemConfig = pkgs.defaultGemConfig // {
             nokogiri = attrs: {
-              buildInputs = with pkgs; [ pkgs.rubyPackages_3_3.nokogiri ];
+              buildInputs = with pkgs; [ rubyPackages_3_3.nokogiri ];
             };
           };
         };
@@ -30,16 +30,16 @@
         # Main package
         hubctl = pkgs.stdenv.mkDerivation {
           pname = "hubctl";
-          version = "0.3.0";
+          version = "0.3.1";
           src = self;
-          
+
           buildInputs = [ gems ];
-          
+
           installPhase = ''
             mkdir -p $out/bin $out/app
             cp -r lib $out/app/
             cp -r bin $out/app/
-            
+
             # Create wrapper script
             cat > $out/bin/hubctl <<EOF
             #!/bin/sh

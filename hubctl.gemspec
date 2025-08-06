@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name          = "hubctl"
-  spec.version       = "0.3.0"
+  spec.version       = "0.3.1"
   spec.authors       = ["Jordan Garrison"]
   spec.email         = ["jordan@jordangarrison.dev"]
 
