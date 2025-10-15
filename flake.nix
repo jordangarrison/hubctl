@@ -33,21 +33,21 @@
           version = "0.3.1";
           src = self;
 
-          buildInputs = [ gems ];
+          buildInputs = [ gems pkgs.ruby_3_3 ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
 
           installPhase = ''
             mkdir -p $out/bin $out/app
             cp -r lib $out/app/
             cp -r bin $out/app/
 
-            # Create wrapper script
-            cat > $out/bin/hubctl <<EOF
-            #!/bin/sh
-            export GEM_PATH="${gems}/${gems.ruby.gemPath}"
-            cd $out/app
-            exec ${pkgs.ruby_3_3}/bin/ruby -Ilib bin/hubctl "\$@"
-            EOF
-            chmod +x $out/bin/hubctl
+            # Create wrapper script with proper library paths
+            makeWrapper ${pkgs.ruby_3_3}/bin/ruby $out/bin/hubctl \
+              --set GEM_HOME "${gems}/${gems.ruby.gemPath}" \
+              --set GEM_PATH "${gems}/${gems.ruby.gemPath}" \
+              --prefix LD_LIBRARY_PATH : "${pkgs.ruby_3_3}/lib" \
+              --add-flags "-I$out/app/lib" \
+              --add-flags "$out/app/bin/hubctl"
           '';
         };
 
