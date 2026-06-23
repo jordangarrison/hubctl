@@ -459,4 +459,58 @@ describe('Enterprise service', () => {
       )
     )
   })
+
+  describe('security analysis', () => {
+    const settingsRoute = 'GET /enterprises/{enterprise}/code_security_analysis'
+    const updateRoute = 'PATCH /enterprises/{enterprise}/code_security_analysis'
+
+    it.effect('gets the current security analysis settings', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.securityAnalysis(enterprise)
+        expect(result).toEqual({
+          dependency_graph_enabled_for_new_repositories: true,
+          secret_scanning_enabled_for_new_repositories: false,
+          secret_scanning_push_protection_enabled_for_new_repositories: false,
+        })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              [settingsRoute]: {
+                dependency_graph_enabled_for_new_repositories: true,
+                secret_scanning_enabled_for_new_repositories: false,
+                secret_scanning_push_protection_enabled_for_new_repositories: false,
+              },
+            },
+          })
+        )
+      )
+    )
+
+    it.effect('updates security analysis settings via PATCH and forwards the supplied flags', () => {
+      const captured: { params?: Record<string, unknown> } = {}
+      return Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.updateSecurityAnalysis(enterprise, {
+          dependencyGraphEnabled: true,
+          secretScanningEnabled: true,
+        })
+        expect(result).toEqual({ enterprise, updated: true })
+        expect(captured.params?.dependency_graph_enabled_for_new_repositories).toBe(true)
+        expect(captured.params?.secret_scanning_enabled_for_new_repositories).toBe(true)
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              [updateRoute]: (params: Record<string, unknown>) => {
+                captured.params = params
+                return {}
+              },
+            },
+          })
+        )
+      )
+    })
+  })
 })

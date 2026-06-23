@@ -248,6 +248,19 @@ export interface RemoveSsoResult {
   readonly removed: boolean
 }
 
+// === Security analysis ===
+
+export interface SecurityAnalysisInput {
+  readonly dependencyGraphEnabled?: boolean
+  readonly secretScanningEnabled?: boolean
+  readonly secretScanningPushProtectionEnabled?: boolean
+}
+
+export interface UpdateSecurityResult {
+  readonly enterprise: string
+  readonly updated: boolean
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
   readonly listSsoAuthorizations: (enterprise: string) => Effect.Effect<ReadonlyArray<SsoAuthorization>, GithubError>
@@ -274,6 +287,14 @@ export interface EnterpriseShape {
   // Raw enterprise statistics payload (lib/hubctl/enterprise.rb#stats), emitted
   // verbatim — the Ruby only formats it for the table view.
   readonly stats: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
+  // Security-analysis settings get/update (lib/hubctl/enterprise.rb#security).
+  // `securityAnalysis` returns the raw settings; `updateSecurityAnalysis` PATCHes
+  // the supplied flags and confirms.
+  readonly securityAnalysis: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
+  readonly updateSecurityAnalysis: (
+    enterprise: string,
+    input: SecurityAnalysisInput
+  ) => Effect.Effect<UpdateSecurityResult, GithubError>
   readonly members: (
     enterprise: string,
     input: MembersInput
@@ -508,6 +529,20 @@ const toSsoAuthorizationDetail = (auth: typeof SsoAuthRaw.Type): SsoAuthorizatio
   organization_count: auth.organization_count ?? null,
 })
 
+// Build the security-analysis update body (lib/hubctl/enterprise.rb#security
+// `update_options` merge): include only the flags the caller supplied.
+const securityUpdateBody = (input: SecurityAnalysisInput): Record<string, unknown> => ({
+  ...(input.dependencyGraphEnabled === undefined
+    ? {}
+    : { dependency_graph_enabled_for_new_repositories: input.dependencyGraphEnabled }),
+  ...(input.secretScanningEnabled === undefined
+    ? {}
+    : { secret_scanning_enabled_for_new_repositories: input.secretScanningEnabled }),
+  ...(input.secretScanningPushProtectionEnabled === undefined
+    ? {}
+    : { secret_scanning_push_protection_enabled_for_new_repositories: input.secretScanningPushProtectionEnabled }),
+})
+
 // === Audit-log helpers ===
 
 // Raw audit-log entry fields read by `auditLog`. All optional/nullable on the
@@ -727,6 +762,19 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .request('GET /enterprises/{enterprise}/stats/all', { enterprise })
           .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.stats'))
 
+      const securityAnalysis: EnterpriseShape['securityAnalysis'] = (enterprise) =>
+        github
+          .request('GET /enterprises/{enterprise}/code_security_analysis', { enterprise })
+          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.securityAnalysis'))
+
+      const updateSecurityAnalysis: EnterpriseShape['updateSecurityAnalysis'] = (enterprise, input) =>
+        github
+          .request('PATCH /enterprises/{enterprise}/code_security_analysis', {
+            enterprise,
+            ...securityUpdateBody(input),
+          })
+          .pipe(Effect.as({ enterprise, updated: true }), Effect.withSpan('Enterprise.updateSecurityAnalysis'))
+
       const owners: EnterpriseShape['owners'] = (enterprise) =>
         fetchAllUsers(enterprise).pipe(
           Effect.map((users) => users.filter(isOwner).map(transformMember)),
@@ -786,6 +834,8 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         sharedStorageBilling,
         consumedLicenses,
         stats,
+        securityAnalysis,
+        updateSecurityAnalysis,
         auditLog,
         listSsoAuthorizations,
         showSsoAuthorization,

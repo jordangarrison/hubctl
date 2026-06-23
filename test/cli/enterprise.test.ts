@@ -403,4 +403,59 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('security-analysis', () => {
+    it.effect('get emits the current settings', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['security-analysis', 'get', 'acme'], {
+          github: {
+            routes: {
+              'GET /enterprises/{enterprise}/code_security_analysis': {
+                dependency_graph_enabled_for_new_repositories: true,
+              },
+            },
+          },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.security-analysis.get')
+        expect(env.result).toMatchObject({ dependency_graph_enabled_for_new_repositories: true })
+      })
+    )
+
+    it.effect('update in json mode without --yes gates with a re-run fix', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['security-analysis', 'update', 'acme', '--dependency-graph'], {
+          github: {},
+        })
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('enterprise.security-analysis.update')
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('update with --yes PATCHes the supplied flags', () => {
+      const captured: { params?: Record<string, unknown> } = {}
+      return Effect.gen(function* () {
+        const env = yield* runCli(
+          enterpriseCommand,
+          ['security-analysis', 'update', 'acme', '--dependency-graph', '--secret-scanning', '--yes'],
+          {
+            github: {
+              routes: {
+                'PATCH /enterprises/{enterprise}/code_security_analysis': (params: Record<string, unknown>) => {
+                  captured.params = params
+                  return {}
+                },
+              },
+            },
+          }
+        )
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.security-analysis.update')
+        expect(env.result).toMatchObject({ updated: true })
+        expect(captured.params?.dependency_graph_enabled_for_new_repositories).toBe(true)
+        expect(captured.params?.secret_scanning_enabled_for_new_repositories).toBe(true)
+      })
+    })
+  })
 })

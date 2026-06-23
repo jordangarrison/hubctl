@@ -5,7 +5,13 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Enterprise } from '../services/enterprise'
-import type { AuditLogInput, CreateOrgInput, MembersInput, OrganizationsInput } from '../services/enterprise'
+import type {
+  AuditLogInput,
+  CreateOrgInput,
+  MembersInput,
+  OrganizationsInput,
+  SecurityAnalysisInput,
+} from '../services/enterprise'
 import { emit } from './handle'
 
 // The `enterprise` command group. Commands stay THIN: parse Flags/Arguments,
@@ -527,6 +533,93 @@ const statsCommand = Command.make('stats', { enterprise: enterpriseArg }).pipe(
   )
 )
 
+// === security-analysis ===
+
+const securityGetCommand = Command.make('get', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise security analysis settings'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.security-analysis.get', ent.securityAnalysis(enterprise), {
+          next_actions: ['hubctl enterprise security-analysis update <enterprise> --yes'],
+        })
+      )
+    )
+  )
+)
+
+const dependencyGraphFlag = Flag.boolean('dependency-graph').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Enable dependency graph for new repositories')
+)
+const secretScanningFlag = Flag.boolean('secret-scanning').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Enable secret scanning for new repositories')
+)
+const secretScanningPushFlag = Flag.boolean('secret-scanning-push-protection').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Enable secret scanning push protection for new repositories')
+)
+
+// Map a boolean flag to a `{ key: true }` fragment only when set, mirroring the
+// Ruby `update_options[:x] = options[:x] if options[:x]` truthy-only merge.
+const flagWhenSet = (key: string, value: boolean): Record<string, boolean> => (value ? { [key]: true } : {})
+
+const securityUpdateCommand = Command.make('update', {
+  enterprise: enterpriseArg,
+  dependencyGraph: dependencyGraphFlag,
+  secretScanning: secretScanningFlag,
+  secretScanningPush: secretScanningPushFlag,
+  yes: yesFlag,
+}).pipe(
+  Command.withDescription('Update enterprise security analysis settings'),
+  Command.withHandler(({ dependencyGraph, enterprise, secretScanning, secretScanningPush, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const ent = yield* Enterprise
+      const confirmed = yield* confirmDestructive(
+        `Update enterprise security analysis settings for ${enterprise}?`,
+        yes,
+        output
+      )
+
+      if (confirmed) {
+        const input: SecurityAnalysisInput = {
+          ...flagWhenSet('dependencyGraphEnabled', dependencyGraph),
+          ...flagWhenSet('secretScanningEnabled', secretScanning),
+          ...flagWhenSet('secretScanningPushProtectionEnabled', secretScanningPush),
+        }
+        yield* emit('enterprise.security-analysis.update', ent.updateSecurityAnalysis(enterprise, input), {
+          next_actions: ['hubctl enterprise security-analysis get <enterprise>'],
+        })
+        return
+      }
+
+      yield* output.mode === 'json'
+        ? output.fail('enterprise.security-analysis.update', {
+            code: 'confirmation_required',
+            message: `Updating security analysis settings for ${enterprise} was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('enterprise.security-analysis.update', { enterprise, updated: false, cancelled: true })
+    })
+  )
+)
+
+const securitySubcommands = [securityGetCommand, securityUpdateCommand] as const
+
+const securityAnalysisCommand = Command.make('security-analysis').pipe(
+  Command.withDescription('Manage enterprise security analysis settings'),
+  Command.withHandler(() =>
+    Output.pipe(
+      Effect.flatMap((output) =>
+        output.ok('enterprise.security-analysis', { commands: securitySubcommands.map(toEntry) })
+      )
+    )
+  ),
+  Command.withSubcommands(securitySubcommands)
+)
+
 // === group discovery ===
 
 const subcommands = [
@@ -538,6 +631,7 @@ const subcommands = [
   auditLogCommand,
   ssoCommand,
   statsCommand,
+  securityAnalysisCommand,
 ] as const
 
 export const enterpriseCommand = (): Command.Command<
