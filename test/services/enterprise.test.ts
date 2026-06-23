@@ -383,4 +383,59 @@ describe('Enterprise service', () => {
       )
     )
   })
+
+  describe('saml sso', () => {
+    const auth = {
+      login: 'alice',
+      saml_identity: { username: 'alice@acme.test', name_id: 'alice@acme.test' },
+      last_used: '2024-01-01T00:00:00Z',
+      credential_authorized_at: '2023-01-01T00:00:00Z',
+      credential_expires_at: '2025-01-01T00:00:00Z',
+      organization_count: 3,
+    }
+
+    it.effect('lists sso authorizations with shaped rows', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.listSsoAuthorizations(enterprise)
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          login: 'alice',
+          saml_identity: 'alice@acme.test',
+          name_id: 'alice@acme.test',
+          last_used: '2024-01-01T00:00:00Z',
+          credential_authorized_at: '2023-01-01T00:00:00Z',
+          credential_expires_at: '2025-01-01T00:00:00Z',
+        })
+      }).pipe(Effect.provide(withRoutes({ routes: { 'GET /enterprises/{enterprise}/sso/authorizations': [auth] } })))
+    )
+
+    it.effect('shows one sso authorization with organization_count', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.showSsoAuthorization(enterprise, 'alice')
+        expect(result).toEqual({
+          login: 'alice',
+          saml_identity_username: 'alice@acme.test',
+          saml_identity_name_id: 'alice@acme.test',
+          last_used: '2024-01-01T00:00:00Z',
+          credential_authorized_at: '2023-01-01T00:00:00Z',
+          credential_expires_at: '2025-01-01T00:00:00Z',
+          organization_count: 3,
+        })
+      }).pipe(
+        Effect.provide(withRoutes({ routes: { 'GET /enterprises/{enterprise}/sso/authorizations/{login}': auth } }))
+      )
+    )
+
+    it.effect('removes one sso authorization', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.removeSsoAuthorization(enterprise, 'alice')
+        expect(result).toEqual({ enterprise, login: 'alice', removed: true })
+      }).pipe(
+        Effect.provide(withRoutes({ routes: { 'DELETE /enterprises/{enterprise}/sso/authorizations/{login}': {} } }))
+      )
+    )
+  })
 })

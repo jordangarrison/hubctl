@@ -206,8 +206,56 @@ export interface AuditLogInput {
   readonly perPage?: number
 }
 
+// === SAML SSO ===
+
+// Row shape for `enterprise sso list` (lib/hubctl/enterprise.rb SamlSso#list).
+export interface SsoAuthorization {
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly login: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly saml_identity: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly name_id: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly last_used: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly credential_authorized_at: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly credential_expires_at: string | null
+}
+
+// Detail shape for `enterprise sso show` (lib/hubctl/enterprise.rb SamlSso#show).
+export interface SsoAuthorizationDetail {
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly login: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly saml_identity_username: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly saml_identity_name_id: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly last_used: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly credential_authorized_at: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly credential_expires_at: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly organization_count: number | null
+}
+
+export interface RemoveSsoResult {
+  readonly enterprise: string
+  readonly login: string
+  readonly removed: boolean
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  readonly listSsoAuthorizations: (enterprise: string) => Effect.Effect<ReadonlyArray<SsoAuthorization>, GithubError>
+  readonly showSsoAuthorization: (
+    enterprise: string,
+    login: string
+  ) => Effect.Effect<SsoAuthorizationDetail, GithubError>
+  readonly removeSsoAuthorization: (enterprise: string, login: string) => Effect.Effect<RemoveSsoResult, GithubError>
   // Paginated audit log (lib/hubctl/enterprise.rb#audit_log). Returns the full
   // paged result for now; Phase 8.1 wires the same data into NDJSON streaming —
   // `auditLog` is the clean seam that streaming will consume.
@@ -420,6 +468,43 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
 const RawObject = Schema.Record(Schema.String, Schema.Unknown)
 const decodeRawObject = Schema.decodeUnknownSync(RawObject)
 
+// === SAML SSO helpers ===
+
+const SamlIdentity = Schema.Struct({
+  username: Schema.optional(Schema.NullOr(Schema.String)),
+  name_id: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+const SsoAuthRaw = Schema.Struct({
+  login: Schema.optional(Schema.NullOr(Schema.String)),
+  saml_identity: Schema.optional(Schema.NullOr(SamlIdentity)),
+  last_used: Schema.optional(Schema.NullOr(Schema.String)),
+  credential_authorized_at: Schema.optional(Schema.NullOr(Schema.String)),
+  credential_expires_at: Schema.optional(Schema.NullOr(Schema.String)),
+  organization_count: Schema.optional(Schema.NullOr(Schema.Finite)),
+})
+const decodeSsoAuths = Schema.decodeUnknownSync(Schema.Array(SsoAuthRaw))
+const decodeSsoAuth = Schema.decodeUnknownSync(SsoAuthRaw)
+
+const toSsoAuthorization = (auth: typeof SsoAuthRaw.Type): SsoAuthorization => ({
+  login: auth.login ?? null,
+  saml_identity: auth.saml_identity?.username ?? null,
+  name_id: auth.saml_identity?.name_id ?? null,
+  last_used: auth.last_used ?? null,
+  credential_authorized_at: auth.credential_authorized_at ?? null,
+  credential_expires_at: auth.credential_expires_at ?? null,
+})
+
+const toSsoAuthorizationDetail = (auth: typeof SsoAuthRaw.Type): SsoAuthorizationDetail => ({
+  login: auth.login ?? null,
+  saml_identity_username: auth.saml_identity?.username ?? null,
+  saml_identity_name_id: auth.saml_identity?.name_id ?? null,
+  last_used: auth.last_used ?? null,
+  credential_authorized_at: auth.credential_authorized_at ?? null,
+  credential_expires_at: auth.credential_expires_at ?? null,
+  organization_count: auth.organization_count ?? null,
+})
+
 // === Audit-log helpers ===
 
 // Raw audit-log entry fields read by `auditLog`. All optional/nullable on the
@@ -601,6 +686,27 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .request('GET /enterprises/{enterprise}/billing/shared-storage', { enterprise })
           .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.sharedStorageBilling'))
 
+      const listSsoAuthorizations: EnterpriseShape['listSsoAuthorizations'] = (enterprise) =>
+        github.paginate('GET /enterprises/{enterprise}/sso/authorizations', { enterprise }).pipe(
+          Effect.map(decodeSsoAuths),
+          Effect.map((auths) => auths.map(toSsoAuthorization)),
+          Effect.withSpan('Enterprise.listSsoAuthorizations')
+        )
+
+      const showSsoAuthorization: EnterpriseShape['showSsoAuthorization'] = (enterprise, login) =>
+        github
+          .request('GET /enterprises/{enterprise}/sso/authorizations/{login}', { enterprise, login })
+          .pipe(
+            Effect.map(decodeSsoAuth),
+            Effect.map(toSsoAuthorizationDetail),
+            Effect.withSpan('Enterprise.showSsoAuthorization')
+          )
+
+      const removeSsoAuthorization: EnterpriseShape['removeSsoAuthorization'] = (enterprise, login) =>
+        github
+          .request('DELETE /enterprises/{enterprise}/sso/authorizations/{login}', { enterprise, login })
+          .pipe(Effect.as({ enterprise, login, removed: true }), Effect.withSpan('Enterprise.removeSsoAuthorization'))
+
       const auditLog: EnterpriseShape['auditLog'] = (enterprise, input) =>
         github.paginate('GET /enterprises/{enterprise}/audit-log', { enterprise, ...auditParams(input) }).pipe(
           Effect.map(decodeAuditEntries),
@@ -672,6 +778,9 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         sharedStorageBilling,
         consumedLicenses,
         auditLog,
+        listSsoAuthorizations,
+        showSsoAuthorization,
+        removeSsoAuthorization,
         members,
         owners,
         addOwner,

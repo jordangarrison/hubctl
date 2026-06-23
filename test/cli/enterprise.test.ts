@@ -337,4 +337,57 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('sso', () => {
+    const auth = {
+      login: 'alice',
+      saml_identity: { username: 'alice@acme.test', name_id: 'alice@acme.test' },
+      last_used: '2024-01-01T00:00:00Z',
+      credential_authorized_at: '2023-01-01T00:00:00Z',
+      credential_expires_at: '2025-01-01T00:00:00Z',
+      organization_count: 3,
+    }
+
+    it.effect('list emits shaped rows', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['sso', 'list', 'acme'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/sso/authorizations': [auth] } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.sso.list')
+        expect(env.result).toMatchObject([{ login: 'alice', saml_identity: 'alice@acme.test' }])
+      })
+    )
+
+    it.effect('show emits the detail', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['sso', 'show', 'acme', 'alice'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/sso/authorizations/{login}': auth } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.sso.show')
+        expect(env.result).toMatchObject({ login: 'alice', organization_count: 3 })
+      })
+    )
+
+    it.effect('remove in json mode without --yes gates with a re-run fix', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['sso', 'remove', 'acme', 'alice'], { github: {} })
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('enterprise.sso.remove')
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('remove with --yes removes the authorization', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['sso', 'remove', 'acme', 'alice', '--yes'], {
+          github: { routes: { 'DELETE /enterprises/{enterprise}/sso/authorizations/{login}': {} } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.sso.remove')
+        expect(env.result).toMatchObject({ login: 'alice', removed: true })
+      })
+    )
+  })
 })

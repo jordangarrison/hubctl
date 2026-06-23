@@ -442,6 +442,76 @@ const auditLogCommand = Command.make('audit-log', {
   )
 )
 
+// === sso ===
+
+const loginArg = Argument.string('login').pipe(Argument.withDescription('User login'))
+
+const ssoListCommand = Command.make('list', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('List SAML SSO authorizations'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.sso.list', ent.listSsoAuthorizations(enterprise), {
+          next_actions: ['hubctl enterprise sso show <enterprise> <login>'],
+        })
+      )
+    )
+  )
+)
+
+const ssoShowCommand = Command.make('show', { enterprise: enterpriseArg, login: loginArg }).pipe(
+  Command.withDescription('Show a SAML SSO authorization'),
+  Command.withHandler(({ enterprise, login }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.sso.show', ent.showSsoAuthorization(enterprise, login), {
+          next_actions: ['hubctl enterprise sso list <enterprise>'],
+        })
+      )
+    )
+  )
+)
+
+const ssoRemoveCommand = Command.make('remove', { enterprise: enterpriseArg, login: loginArg, yes: yesFlag }).pipe(
+  Command.withDescription('Remove a SAML SSO authorization'),
+  Command.withHandler(({ enterprise, login, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const ent = yield* Enterprise
+      const confirmed = yield* confirmDestructive(
+        `Remove SAML SSO authorization for ${login} from enterprise ${enterprise}?`,
+        yes,
+        output
+      )
+
+      if (confirmed) {
+        yield* emit('enterprise.sso.remove', ent.removeSsoAuthorization(enterprise, login), {
+          next_actions: ['hubctl enterprise sso list <enterprise>'],
+        })
+        return
+      }
+
+      yield* output.mode === 'json'
+        ? output.fail('enterprise.sso.remove', {
+            code: 'confirmation_required',
+            message: `Removing SAML SSO authorization for ${login} from ${enterprise} was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('enterprise.sso.remove', { enterprise, login, removed: false, cancelled: true })
+    })
+  )
+)
+
+const ssoSubcommands = [ssoListCommand, ssoShowCommand, ssoRemoveCommand] as const
+
+const ssoCommand = Command.make('sso').pipe(
+  Command.withDescription('Manage enterprise SAML SSO authorizations'),
+  Command.withHandler(() =>
+    Output.pipe(Effect.flatMap((output) => output.ok('enterprise.sso', { commands: ssoSubcommands.map(toEntry) })))
+  ),
+  Command.withSubcommands(ssoSubcommands)
+)
+
 // === group discovery ===
 
 const subcommands = [
@@ -451,6 +521,7 @@ const subcommands = [
   billingCommand,
   licensesCommand,
   auditLogCommand,
+  ssoCommand,
 ] as const
 
 export const enterpriseCommand = (): Command.Command<
