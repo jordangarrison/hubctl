@@ -15,7 +15,11 @@ export const resolveMode = (input: ResolveModeInput): Mode => {
   if (input.pretty) {
     return 'pretty'
   }
-  if (input.env.NO_COLOR !== undefined || input.env.CI !== undefined || !input.isTTY) {
+  // `NO_COLOR` is intentionally NOT consulted here: it disables color only and
+  // must not switch the output mode (which would silently suppress TTY confirm
+  // prompts). Color-disable is resolved separately (see globals.ts → Output
+  // `noColor`). Non-interactive heuristics (CI / non-TTY) still default to json.
+  if (input.env.CI !== undefined || !input.isTTY) {
     return 'json'
   }
   return 'pretty'

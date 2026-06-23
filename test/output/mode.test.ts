@@ -9,9 +9,12 @@ describe('resolveMode', () => {
   it('--pretty forces pretty even when piped', () => {
     expect(resolveMode({ json: false, pretty: true, env: {}, isTTY: false })).toBe('pretty')
   })
-  it('NO_COLOR/CI/non-TTY default to json', () => {
+  it('CI/non-TTY default to json', () => {
     expect(resolveMode({ json: false, pretty: false, env: { CI: '1' }, isTTY: true })).toBe('json')
     expect(resolveMode({ json: false, pretty: false, env: {}, isTTY: false })).toBe('json')
+  })
+  it('NO_COLOR alone does NOT force json (it only disables color)', () => {
+    expect(resolveMode({ json: false, pretty: false, env: { NO_COLOR: '1' }, isTTY: true })).toBe('pretty')
   })
   it('interactive TTY defaults to pretty', () => {
     expect(resolveMode({ json: false, pretty: false, env: {}, isTTY: true })).toBe('pretty')

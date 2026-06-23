@@ -25,8 +25,10 @@ export interface Globals {
 
 /**
  * Pure mapping from parsed globals + environment + TTY state to the output
- * {@link Mode}. `--no-color` (i.e. `color: false`) forces `json`, mirroring the
- * `NO_COLOR` precedence in {@link resolveMode}.
+ * {@link Mode}. Color is intentionally NOT a factor: `--no-color` only disables
+ * color (see {@link globalsToNoColor}) and must never flip the mode to `json`
+ * (which would silently disable TTY confirm prompts). Only `--json`/`--pretty`
+ * and the non-interactive heuristics (CI / non-TTY) decide the mode.
  */
 export const globalsToMode = (
   globals: Globals,
@@ -37,9 +39,20 @@ export const globalsToMode = (
   resolveMode({
     json: globals.json,
     pretty: globals.pretty,
-    env: globals.color ? env : { ...env, NO_COLOR: '1' },
+    env,
     isTTY,
   })
+
+/**
+ * Whether colored output is disabled. Independent of the output {@link Mode}:
+ * `--no-color` (i.e. `color: false`) OR a `NO_COLOR` env var disables color
+ * while leaving the json/pretty decision untouched.
+ */
+export const globalsToNoColor = (
+  globals: Globals,
+  // eslint-disable-next-line effect/prefer-option-over-null
+  env: Record<string, string | undefined>
+): boolean => !globals.color || env.NO_COLOR !== undefined
 
 /**
  * Edge helper: reads `process.env` and `process.stdout.isTTY` and feeds them
@@ -51,3 +64,12 @@ export const globalsToMode = (
 export const resolveGlobalMode = (globals: Globals): Mode =>
   // eslint-disable-next-line effect/avoid-process-env
   globalsToMode(globals, process.env, process.stdout.isTTY === true)
+
+/**
+ * Edge helper: reads `process.env` and resolves whether color is disabled,
+ * feeding {@link globalsToNoColor}. Kept alongside {@link resolveGlobalMode} so
+ * the impure env read stays at the CLI edge.
+ */
+export const resolveGlobalNoColor = (globals: Globals): boolean =>
+  // eslint-disable-next-line effect/avoid-process-env
+  globalsToNoColor(globals, process.env)

@@ -19,8 +19,14 @@ describe('globalsToMode', () => {
   it('interactive TTY defaults to pretty', () => {
     expect(globalsToMode(base, {}, true)).toBe('pretty')
   })
-  it('--no-color (color=false) forces json even on an interactive TTY', () => {
-    expect(globalsToMode({ json: false, pretty: false, color: false, yes: false }, {}, true)).toBe('json')
+  it('--no-color (color=false) stays pretty on an interactive TTY (color is independent of mode)', () => {
+    expect(globalsToMode({ json: false, pretty: false, color: false, yes: false }, {}, true)).toBe('pretty')
+  })
+  it('--no-color does not override an explicit --json', () => {
+    expect(globalsToMode({ json: true, pretty: false, color: false, yes: false }, {}, true)).toBe('json')
+  })
+  it('--no-color does not override an explicit --pretty when piped', () => {
+    expect(globalsToMode({ json: false, pretty: true, color: false, yes: false }, {}, false)).toBe('pretty')
   })
 })
 

@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { appLayer } from './cli/app-layer'
-import { resolveGlobalMode } from './cli/globals'
+import { resolveGlobalMode, resolveGlobalNoColor } from './cli/globals'
 import { rootCommand } from './cli/root'
 import { VERSION } from './version'
 
@@ -21,12 +21,17 @@ const argv = process.argv.slice(2)
 // Resolve the output mode up front from the same global flags the root command
 // parses, plus the live TTY/env. Defaults: piped/non-TTY/CI → json, interactive
 // TTY → pretty (see resolveMode).
-const mode = resolveGlobalMode({
+const globals = {
   json: argv.includes('--json'),
   pretty: argv.includes('--pretty'),
   color: !argv.includes('--no-color'),
   yes: argv.includes('--yes'),
-})
+}
+const mode = resolveGlobalMode(globals)
+// `--no-color` (or a NO_COLOR env var) disables color independently of `mode`,
+// so an interactive TTY stays pretty (with confirm prompts) while rendering
+// without ANSI color.
+const noColor = resolveGlobalNoColor(globals)
 
 const run = Command.runWith(rootCommand(VERSION), { version: VERSION })
 
@@ -34,4 +39,4 @@ const run = Command.runWith(rootCommand(VERSION), { version: VERSION })
 // provided once here — exactly the pattern `strictEffectProvide` recommends. The
 // diagnostic is disabled for this file via the tsconfig `overrides` entry (its
 // own guidance: "if this is an entry point, you can safely disable this").
-run(argv).pipe(Effect.provide(appLayer({ version: VERSION, mode })), BunRuntime.runMain)
+run(argv).pipe(Effect.provide(appLayer({ version: VERSION, mode, noColor })), BunRuntime.runMain)
