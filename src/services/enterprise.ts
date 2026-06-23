@@ -159,12 +159,28 @@ export interface MembersInput {
   readonly twoFaDisabled?: boolean
 }
 
+// Confirmation of adding / removing an enterprise owner.
+export interface AddOwnerResult {
+  readonly enterprise: string
+  readonly username: string
+  readonly added: boolean
+}
+
+export interface RemoveOwnerResult {
+  readonly enterprise: string
+  readonly username: string
+  readonly removed: boolean
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
   readonly members: (
     enterprise: string,
     input: MembersInput
   ) => Effect.Effect<ReadonlyArray<EnterpriseMember>, GithubError>
+  readonly owners: (enterprise: string) => Effect.Effect<ReadonlyArray<EnterpriseMember>, GithubError>
+  readonly addOwner: (enterprise: string, username: string) => Effect.Effect<AddOwnerResult, GithubError>
+  readonly removeOwner: (enterprise: string, username: string) => Effect.Effect<RemoveOwnerResult, GithubError>
   readonly organizations: (
     enterprise: string,
     input: OrganizationsInput
@@ -482,6 +498,22 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           Effect.withSpan('Enterprise.members')
         )
 
+      const owners: EnterpriseShape['owners'] = (enterprise) =>
+        fetchAllUsers(enterprise).pipe(
+          Effect.map((users) => users.filter(isOwner).map(transformMember)),
+          Effect.withSpan('Enterprise.owners')
+        )
+
+      const addOwner: EnterpriseShape['addOwner'] = (enterprise, username) =>
+        github
+          .request('PUT /enterprises/{enterprise}/owners/{username}', { enterprise, username })
+          .pipe(Effect.as({ enterprise, username, added: true }), Effect.withSpan('Enterprise.addOwner'))
+
+      const removeOwner: EnterpriseShape['removeOwner'] = (enterprise, username) =>
+        github
+          .request('DELETE /enterprises/{enterprise}/owners/{username}', { enterprise, username })
+          .pipe(Effect.as({ enterprise, username, removed: true }), Effect.withSpan('Enterprise.removeOwner'))
+
       const organizations: EnterpriseShape['organizations'] = (enterprise, input) =>
         github
           .paginate('GET /enterprises/{enterprise}/organizations', {
@@ -519,7 +551,17 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
             Effect.withSpan('Enterprise.removeOrganization')
           )
 
-      return { billing, members, organizations, createOrganization, transferOrganization, removeOrganization }
+      return {
+        billing,
+        members,
+        owners,
+        addOwner,
+        removeOwner,
+        organizations,
+        createOrganization,
+        transferOrganization,
+        removeOrganization,
+      }
     })
   )
 }

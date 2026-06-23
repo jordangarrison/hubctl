@@ -226,9 +226,102 @@ const membersCommand = Command.make('members', {
   )
 )
 
+// === owners ===
+
+const usernameArg = Argument.string('username').pipe(Argument.withDescription('Username'))
+
+const ownersListCommand = Command.make('list', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('List enterprise owners'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.owners.list', ent.owners(enterprise), {
+          next_actions: ['hubctl enterprise owners add <enterprise> <username> --yes'],
+        })
+      )
+    )
+  )
+)
+
+const ownersAddCommand = Command.make('add', { enterprise: enterpriseArg, username: usernameArg, yes: yesFlag }).pipe(
+  Command.withDescription('Add an enterprise owner'),
+  Command.withHandler(({ enterprise, username, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const ent = yield* Enterprise
+      const confirmed = yield* confirmDestructive(
+        `Add ${username} as an owner of enterprise ${enterprise}?`,
+        yes,
+        output
+      )
+
+      if (confirmed) {
+        yield* emit('enterprise.owners.add', ent.addOwner(enterprise, username), {
+          next_actions: ['hubctl enterprise owners list <enterprise>'],
+        })
+        return
+      }
+
+      yield* output.mode === 'json'
+        ? output.fail('enterprise.owners.add', {
+            code: 'confirmation_required',
+            message: `Adding ${username} as owner of ${enterprise} was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('enterprise.owners.add', { enterprise, username, added: false, cancelled: true })
+    })
+  )
+)
+
+const ownersRemoveCommand = Command.make('remove', {
+  enterprise: enterpriseArg,
+  username: usernameArg,
+  yes: yesFlag,
+}).pipe(
+  Command.withDescription('Remove an enterprise owner'),
+  Command.withHandler(({ enterprise, username, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const ent = yield* Enterprise
+      const confirmed = yield* confirmDestructive(
+        `Remove ${username} as an owner of enterprise ${enterprise}?`,
+        yes,
+        output
+      )
+
+      if (confirmed) {
+        yield* emit('enterprise.owners.remove', ent.removeOwner(enterprise, username), {
+          next_actions: ['hubctl enterprise owners list <enterprise>'],
+        })
+        return
+      }
+
+      yield* output.mode === 'json'
+        ? output.fail('enterprise.owners.remove', {
+            code: 'confirmation_required',
+            message: `Removing ${username} as owner of ${enterprise} was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('enterprise.owners.remove', { enterprise, username, removed: false, cancelled: true })
+    })
+  )
+)
+
+const ownersSubcommands = [ownersListCommand, ownersAddCommand, ownersRemoveCommand] as const
+
+const ownersCommand = Command.make('owners').pipe(
+  Command.withDescription('Manage enterprise owners'),
+  Command.withHandler(() =>
+    Output.pipe(
+      Effect.flatMap((output) => output.ok('enterprise.owners', { commands: ownersSubcommands.map(toEntry) }))
+    )
+  ),
+  Command.withSubcommands(ownersSubcommands)
+)
+
 // === group discovery ===
 
-const subcommands = [orgsCommand, membersCommand] as const
+const subcommands = [orgsCommand, membersCommand, ownersCommand] as const
 
 export const enterpriseCommand = (): Command.Command<
   'enterprise',

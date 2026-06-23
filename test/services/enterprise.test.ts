@@ -210,4 +210,50 @@ describe('Enterprise service', () => {
       }).pipe(Effect.provide(withRoutes({ routes: { [consumedRoute]: { users } } })))
     )
   })
+
+  describe('owners', () => {
+    const consumedRoute = 'GET /enterprises/{enterprise}/consumed-licenses'
+    const users = [
+      {
+        github_com_login: 'alice',
+        github_com_enterprise_roles: ['Owner'],
+        github_com_verified_domain_emails: ['alice@acme.test'],
+        github_com_two_factor_auth: true,
+        github_com_saml_name_id: 'alice@acme.test',
+      },
+      {
+        github_com_login: 'bob',
+        github_com_enterprise_roles: ['Member'],
+        github_com_verified_domain_emails: [],
+        github_com_two_factor_auth: false,
+        github_com_saml_name_id: null,
+      },
+    ]
+
+    it.effect('lists only owners', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.owners(enterprise)
+        expect(result).toHaveLength(1)
+        expect(result[0]?.login).toBe('alice')
+        expect(result[0]?.role).toBe('admin')
+      }).pipe(Effect.provide(withRoutes({ routes: { [consumedRoute]: { users } } })))
+    )
+
+    it.effect('adds an owner via PUT', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.addOwner(enterprise, 'carol')
+        expect(result).toEqual({ enterprise, username: 'carol', added: true })
+      }).pipe(Effect.provide(withRoutes({ routes: { 'PUT /enterprises/{enterprise}/owners/{username}': {} } })))
+    )
+
+    it.effect('removes an owner via DELETE', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.removeOwner(enterprise, 'carol')
+        expect(result).toEqual({ enterprise, username: 'carol', removed: true })
+      }).pipe(Effect.provide(withRoutes({ routes: { 'DELETE /enterprises/{enterprise}/owners/{username}': {} } })))
+    )
+  })
 })

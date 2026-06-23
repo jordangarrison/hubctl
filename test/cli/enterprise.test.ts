@@ -156,4 +156,65 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('owners', () => {
+    const users = [
+      {
+        github_com_login: 'alice',
+        github_com_enterprise_roles: ['Owner'],
+        github_com_verified_domain_emails: ['alice@acme.test'],
+        github_com_two_factor_auth: true,
+        github_com_saml_name_id: 'alice@acme.test',
+      },
+      {
+        github_com_login: 'bob',
+        github_com_enterprise_roles: ['Member'],
+        github_com_verified_domain_emails: [],
+        github_com_two_factor_auth: false,
+        github_com_saml_name_id: null,
+      },
+    ]
+
+    it.effect('list returns only owners', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['owners', 'list', 'acme'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/consumed-licenses': { users } } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.owners.list')
+        expect(env.result).toMatchObject([{ login: 'alice' }])
+      })
+    )
+
+    it.effect('add in json mode without --yes gates with a re-run fix', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['owners', 'add', 'acme', 'carol'], { github: {} })
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('enterprise.owners.add')
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('add with --yes adds the owner', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['owners', 'add', 'acme', 'carol', '--yes'], {
+          github: { routes: { 'PUT /enterprises/{enterprise}/owners/{username}': {} } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.owners.add')
+        expect(env.result).toMatchObject({ username: 'carol', added: true })
+      })
+    )
+
+    it.effect('remove with --yes removes the owner', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['owners', 'remove', 'acme', 'carol', '--yes'], {
+          github: { routes: { 'DELETE /enterprises/{enterprise}/owners/{username}': {} } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.owners.remove')
+        expect(env.result).toMatchObject({ username: 'carol', removed: true })
+      })
+    )
+  })
 })
