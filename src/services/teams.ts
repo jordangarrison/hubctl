@@ -13,6 +13,7 @@ import type { GithubError } from '../github/errors'
 
 export type TeamPrivacy = 'secret' | 'closed'
 export type TeamPermission = 'pull' | 'triage' | 'push' | 'maintain' | 'admin'
+export type TeamRole = 'member' | 'maintainer'
 
 // Row shape for `teams list` (lib/hubctl/teams.rb#list `team_data`).
 export interface TeamListItem {
@@ -51,10 +52,20 @@ export interface TeamMember {
   readonly url: string
 }
 
+// Outcome of adding a user (lib/hubctl/teams.rb#add_member). `state`/`role` are
+// read back from the membership endpoint's response.
+export interface AddResult {
+  readonly team: string
+  readonly user: string
+  readonly role: string
+  readonly state: string
+}
+
 export interface TeamsShape {
   readonly list: (org: string) => Effect.Effect<ReadonlyArray<TeamListItem>, GithubError>
   readonly create: (org: string, name: string, input: CreateInput) => Effect.Effect<CreatedTeam, GithubError>
   readonly members: (org: string, team: string) => Effect.Effect<ReadonlyArray<TeamMember>, GithubError>
+  readonly add: (org: string, team: string, user: string, role: TeamRole) => Effect.Effect<AddResult, GithubError>
 }
 
 // Raw team payload fields read by `list`. `description` is nullable on the wire;
@@ -122,6 +133,10 @@ const toMember = (member: typeof Member.Type): TeamMember => ({
   url: member.html_url,
 })
 
+// The membership endpoint response carries the resulting `state`/`role`.
+const Membership = Schema.Struct({ state: Schema.String, role: Schema.String })
+const decodeMembership = Schema.decodeUnknownSync(Membership)
+
 export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
   static readonly layer: Layer.Layer<Teams, never, Github> = Layer.effect(
     Teams,
@@ -147,7 +162,26 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
           Effect.withSpan('Teams.members')
         )
 
-      return { list, create, members }
+      // Preserve the Ruby's newer org-based membership endpoint (equivalent to
+      // octokit.js addOrUpdateMembershipForUserInOrg): a PUT against the team's
+      // org+slug route, which can both invite to the org and add to the team.
+      const add: TeamsShape['add'] = (org, team, user, role) =>
+        github
+          .request('PUT /orgs/{org}/teams/{team_slug}/memberships/{username}', {
+            org,
+            team_slug: team,
+            username: user,
+            role,
+          })
+          .pipe(
+            Effect.map((raw) => {
+              const membership = decodeMembership(raw)
+              return { team, user, role: membership.role, state: membership.state }
+            }),
+            Effect.withSpan('Teams.add')
+          )
+
+      return { list, create, members, add }
     })
   )
 }

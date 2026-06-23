@@ -176,4 +176,32 @@ describe('Teams service', () => {
       )
     )
   })
+
+  describe('add', () => {
+    it.effect('adds a user via the org-based membership endpoint with the role', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.add('acme', 'core', 'octocat', 'maintainer')
+        expect(result).toEqual({ team: 'core', user: 'octocat', role: 'maintainer', state: 'active' })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'PUT /orgs/{org}/teams/{team_slug}/memberships/{username}': (params: Record<string, unknown>) =>
+                    params.org === 'acme' &&
+                    params.team_slug === 'core' &&
+                    params.username === 'octocat' &&
+                    params.role === 'maintainer'
+                      ? { state: 'active', role: 'maintainer' }
+                      : { state: 'WRONG', role: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
 })

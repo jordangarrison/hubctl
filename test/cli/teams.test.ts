@@ -67,6 +67,7 @@ describe('teams command', () => {
       expect(names).toContain('list')
       expect(names).toContain('create')
       expect(names).toContain('members')
+      expect(names).toContain('add')
     })
   )
 
@@ -153,6 +154,46 @@ describe('teams command', () => {
         const rows = decodeMembers(env.result)
         expect(rows[0]?.login).toBe('octocat')
         expect(env.next_actions).toContain('hubctl teams add <team> <user> --org <org>')
+      })
+    )
+  })
+
+  describe('add', () => {
+    it.effect('adds a user via the org-based membership endpoint with the role', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['add', 'core', 'octocat', '--org', 'acme', '--role', 'maintainer'], {
+          github: {
+            routes: {
+              'PUT /orgs/{org}/teams/{team_slug}/memberships/{username}': (params: Record<string, unknown>) =>
+                params.org === 'acme' &&
+                params.team_slug === 'core' &&
+                params.username === 'octocat' &&
+                params.role === 'maintainer'
+                  ? { state: 'active', role: 'maintainer' }
+                  : { state: 'WRONG', role: 'WRONG' },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.add')
+        expect(env.result).toMatchObject({ team: 'core', user: 'octocat', role: 'maintainer', state: 'active' })
+      })
+    )
+
+    it.effect('defaults the role to member', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['add', 'core', 'octocat', '--org', 'acme'], {
+          github: {
+            routes: {
+              'PUT /orgs/{org}/teams/{team_slug}/memberships/{username}': (params: Record<string, unknown>) =>
+                params.role === 'member' ? { state: 'active', role: 'member' } : { state: 'WRONG', role: 'WRONG' },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ role: 'member' })
       })
     )
   })

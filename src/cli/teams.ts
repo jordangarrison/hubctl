@@ -80,9 +80,28 @@ const membersCommand = Command.make('members', { team: teamArg, org: orgFlag }).
   )
 )
 
+const userArg = Argument.string('user').pipe(Argument.withDescription('Username'))
+const roleFlag = Flag.choice('role', ['member', 'maintainer']).pipe(
+  Flag.withDefault('member'),
+  Flag.withDescription('Membership role')
+)
+
+const addCommand = Command.make('add', { team: teamArg, user: userArg, org: orgFlag, role: roleFlag }).pipe(
+  Command.withDescription('Add a user to a team'),
+  Command.withHandler(({ org, role, team, user }) =>
+    Teams.pipe(
+      Effect.flatMap((teams) =>
+        emit('teams.add', teams.add(org, team, user, role), {
+          next_actions: ['hubctl teams members <team> --org <org>'],
+        })
+      )
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl teams` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, createCommand, membersCommand] as const
+const subcommands = [listCommand, createCommand, membersCommand, addCommand] as const
 
 interface GroupEntry {
   readonly name: string
