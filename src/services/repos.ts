@@ -1,5 +1,6 @@
 import * as Arr from 'effect/Array'
 import * as Context from 'effect/Context'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
@@ -81,6 +82,17 @@ export interface CreatedRepo {
   readonly html_url: string
 }
 
+// Raised when the spawned `git clone` exits non-zero. Mirrors the Ruby
+// `repos.rb#clone` path that prints "Failed to clone repository" and `exit 1`.
+// Carries git's exit code so the failure surfaces it in the `ok:false` envelope
+// (message + fix); `_tag`/`message`/`fix` make it a `FailableError`.
+// eslint-disable-next-line effect/avoid-data-tagged-error
+export class GitCloneError extends Data.TaggedError('GitCloneError')<{
+  readonly message: string
+  readonly fix: string
+  readonly exitCode: number
+}> {}
+
 export interface CloneInput {
   readonly path?: string
   readonly depth?: number
@@ -106,7 +118,7 @@ export interface ReposShape {
   readonly clone: (
     repo: string,
     input: CloneInput
-  ) => Effect.Effect<CloneResult, GithubError | PlatformError, ChildProcessSpawner.ChildProcessSpawner>
+  ) => Effect.Effect<CloneResult, GithubError | PlatformError | GitCloneError, ChildProcessSpawner.ChildProcessSpawner>
   readonly archive: (repo: string) => Effect.Effect<ArchiveResult, GithubError>
   readonly topics: (repo: string, mod: TopicsMod) => Effect.Effect<TopicsResult, GithubError>
 }
@@ -332,14 +344,30 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
           Effect.flatMap((detail) => {
             const args = cloneArgs(detail.clone_url, input)
             const targetPath = input.path ?? basename(repo)
+            const command = `git ${args.join(' ')}`
             return ChildProcessSpawner.ChildProcessSpawner.pipe(
               Effect.flatMap((spawner) => spawner.exitCode(ChildProcess.make('git', args))),
-              Effect.map((exitCode) => ({
-                command: `git ${args.join(' ')}`,
-                clone_url: detail.clone_url,
-                target_path: targetPath,
-                exit_code: Number(exitCode),
-              }))
+              Effect.flatMap((exitCode) => {
+                const code = Number(exitCode)
+                // Non-zero git exit ⇒ fail in the typed channel so `emit` renders
+                // an `ok:false` envelope (and the process exits non-zero),
+                // matching the Ruby `exit 1` on a failed `system(clone_cmd)`.
+                if (code !== 0) {
+                  return Effect.fail(
+                    new GitCloneError({
+                      message: `git clone failed (exit ${code})`,
+                      fix: `Run \`${command}\` directly to see git's output, then retry`,
+                      exitCode: code,
+                    })
+                  )
+                }
+                return Effect.succeed({
+                  command,
+                  clone_url: detail.clone_url,
+                  target_path: targetPath,
+                  exit_code: code,
+                })
+              })
             )
           }),
           Effect.withSpan('Repos.clone')

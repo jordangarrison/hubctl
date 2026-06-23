@@ -55,6 +55,9 @@ export interface RunCliOptions {
   // FakeSpawner that records each argv here (and returns exit 0) instead of
   // spawning a real process via BunServices.
   readonly spawn?: SpawnerCapture
+  // Exit code the FakeSpawner returns for `git` (default 0). A non-zero value
+  // lets a test exercise the `repos clone` failure path.
+  readonly spawnExit?: number
   // Config-service fixtures for the `config` command group. Seeds an in-memory
   // FileSystem-backed `Config` (so tests never touch the real
   // `~/.config/hubctl/config.json`) and lets a test read back what was written.
@@ -184,7 +187,7 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
     const platform =
       options.spawn === undefined
         ? BunServices.layer
-        : Layer.provideMerge(FakeSpawner.layer(options.spawn), BunServices.layer)
+        : Layer.provideMerge(FakeSpawner.layer(options.spawn, options.spawnExit ?? 0), BunServices.layer)
     const testLayer = Layer.mergeAll(
       platform,
       Output.layer({ mode: 'json' }),

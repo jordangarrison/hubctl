@@ -237,6 +237,23 @@ describe('repos command', () => {
         expect(capture.commands[0]).toEqual(['git', 'clone', 'https://github.com/octocat/hello.git'])
       })
     )
+
+    it.effect('emits an ok:false envelope with a fix when git exits non-zero', () =>
+      Effect.gen(function* () {
+        const capture: { commands: Array<ReadonlyArray<string>> } = { commands: [] }
+        const env = yield* runCli(reposCommand, ['clone', 'octocat/hello'], {
+          github: { routes: { 'GET /repos/{owner}/{repo}': fullPayload } },
+          spawn: capture,
+          spawnExit: 128,
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('repos.clone')
+        expect(env.result).toBeNull()
+        expect(env.error?.code).toBe('GitCloneError')
+        expect(env.fix).not.toBeNull()
+      })
+    )
   })
 
   describe('archive', () => {

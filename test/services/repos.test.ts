@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,7 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError } from '../../src/github/errors'
-import { Repos } from '../../src/services/repos'
+import { GitCloneError, Repos } from '../../src/services/repos'
 import { FakeGithub } from '../helpers/fake-github'
 import { FakeSpawner } from '../helpers/fake-spawner'
 import type { SpawnerCapture } from '../helpers/fake-spawner'
@@ -311,12 +311,26 @@ describe('Repos service', () => {
       }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
     )
 
-    it.effect('reports a non-zero exit code when git fails', () =>
+    it.effect('succeeds with exit_code 0 when git succeeds', () =>
       Effect.gen(function* () {
         const capture: SpawnerCapture = { commands: [] }
         const repos = yield* Repos
-        const result = yield* repos.clone('octocat/hello', {}).pipe(Effect.provide(FakeSpawner.layer(capture, 128)))
-        expect(result.exit_code).toBe(128)
+        const result = yield* repos.clone('octocat/hello', {}).pipe(Effect.provide(FakeSpawner.layer(capture, 0)))
+        expect(result.exit_code).toBe(0)
+      }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
+    )
+
+    it.effect('fails (typed error) when git exits non-zero, surfacing the exit code', () =>
+      Effect.gen(function* () {
+        const capture: SpawnerCapture = { commands: [] }
+        const repos = yield* Repos
+        const exit = yield* Effect.exit(
+          repos.clone('octocat/hello', {}).pipe(Effect.provide(FakeSpawner.layer(capture, 128)))
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof GitCloneError)
+        expect(error.exitCode).toBe(128)
       }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
     )
   })
