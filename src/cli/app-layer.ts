@@ -35,12 +35,17 @@ export interface AppLayerOptions {
   // Output mode resolved from the global flags + env + TTY (see globals.ts).
   readonly mode: Mode
   readonly noColor?: boolean
+  // Optional pre-built `Github` layer. Defaults to the live `githubFromConfig`
+  // (token resolved lazily per request). The REPL harness (Task 8.4) overrides
+  // it with `FakeGithub.layer` so the SAME service graph runs network-free.
+  readonly github?: Layer.Layer<Github>
 }
 
 export const appLayer = (
   options: AppLayerOptions
 ): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | Enterprise | BunServices.BunServices> => {
-  const github: Layer.Layer<Github> = Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
+  const github: Layer.Layer<Github> =
+    options.github ?? Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
 
   return Layer.mergeAll(
     Output.layer({ mode: options.mode, ...(options.noColor === undefined ? {} : { noColor: options.noColor }) }),

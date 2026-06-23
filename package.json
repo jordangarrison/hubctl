@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
+    "repl": "bun repl --preload ./scripts/repl.ts",
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint --config oxlint.config.mjs --report-unused-disable-directives-severity=error src test scripts",
     "lint:fix": "oxlint --config oxlint.config.mjs --report-unused-disable-directives-severity=error --fix src test scripts",

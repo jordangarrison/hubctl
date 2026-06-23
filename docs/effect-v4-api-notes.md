@@ -162,3 +162,32 @@ export class Output extends Context.Service<Output, OutputShape>()('Output') {
 
 Confirm the exact class shape against the language-service
 `serviceNotAsClass`/`nonObjectEffectServiceType` diagnostics when writing each service.
+
+## REPL dev harness — `scripts/repl.ts` (Task 8.4)
+
+Dev-only preload (not a CI gate) for poking at the domain services interactively
+without standing up the CLI. It composes the exact production `appLayer` wiring
+into a long-lived `ManagedRuntime.make(layer)` and exposes a `run` helper:
+
+```sh
+bun run repl                  # = bun repl --preload ./scripts/repl.ts (live)
+HUBCTL_REPL_FAKE=1 bun run repl   # network-free: swaps in FakeGithub.layer
+```
+
+At the prompt, every service tag (`Repos`, `Orgs`, `Users`, `Teams`,
+`Enterprise`, `Auth`) plus `Effect` and `run` are bound on `globalThis`:
+
+```ts
+await run(Repos.pipe(Effect.flatMap((s) =>
+  s.list({ org: 'effect-ts', type: 'all', sort: 'updated', direction: 'desc' }))))
+await run(Users.pipe(Effect.flatMap((s) => s.show('octocat'))))
+```
+
+`run(effect)` provides the runtime and returns a `Promise` of the success value
+(rejecting with the typed error on failure) — exactly what `await` wants.
+
+Layer-reuse note: `appLayer` (`src/cli/app-layer.ts`) gained an optional
+`github` field so `main.ts` and the REPL share ONE service-graph builder; the
+REPL passes `FakeGithub.layer` when `HUBCTL_REPL_FAKE=1`, the live
+`githubFromConfig` otherwise. `ManagedRuntime.make` builds/memoizes the layer
+once per session; `runtime.runPromise` runs each effect over it.
