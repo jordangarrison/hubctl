@@ -5,8 +5,14 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Repos } from '../services/repos'
-import type { ListInput } from '../services/repos'
+import type { CreateInput, ListInput } from '../services/repos'
 import { emit } from './handle'
+
+// Collapse an `Option<string>` flag into the `{ key: value }` fragment a service
+// input expects, or `{}` when absent — so the optional field stays truly absent
+// (exactOptionalPropertyTypes) rather than carrying `undefined`.
+const optionalField = (key: string, value: O.Option<string>): Record<string, string> =>
+  O.match(value, { onNone: () => ({}), onSome: (v) => ({ [key]: v }) })
 
 // The `repos` command group. Commands stay THIN: parse Flags/Arguments, call the
 // `Repos` service, then hand the result (or typed GithubError) to `emit`, which
@@ -40,7 +46,7 @@ const listCommand = Command.make('list', {
     Repos.pipe(
       Effect.flatMap((repos) => {
         const input: ListInput = {
-          ...O.match(org, { onNone: () => ({}), onSome: (value) => ({ org: value }) }),
+          ...optionalField('org', org),
           type,
           sort,
           direction,
@@ -68,10 +74,50 @@ const showCommand = Command.make('show', { repo: repoArg }).pipe(
   )
 )
 
+const nameArg = Argument.string('name').pipe(Argument.withDescription('Repository name'))
+
+const descriptionFlag = Flag.string('description').pipe(Flag.optional, Flag.withDescription('Repository description'))
+const privateFlag = Flag.boolean('private').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Make repository private')
+)
+const initFlag = Flag.boolean('init').pipe(Flag.withDefault(true), Flag.withDescription('Initialize with README'))
+const gitignoreFlag = Flag.string('gitignore').pipe(Flag.optional, Flag.withDescription('Gitignore template'))
+const licenseFlag = Flag.string('license').pipe(Flag.optional, Flag.withDescription('License template'))
+
+const createCommand = Command.make('create', {
+  name: nameArg,
+  org: orgFlag,
+  description: descriptionFlag,
+  private: privateFlag,
+  init: initFlag,
+  gitignore: gitignoreFlag,
+  license: licenseFlag,
+}).pipe(
+  Command.withDescription('Create a new repository'),
+  Command.withHandler(({ description, gitignore, init, license, name, org, private: isPrivate }) =>
+    Repos.pipe(
+      Effect.flatMap((repos) => {
+        const input: CreateInput = {
+          ...optionalField('org', org),
+          ...optionalField('description', description),
+          private: isPrivate,
+          init,
+          ...optionalField('gitignore', gitignore),
+          ...optionalField('license', license),
+        }
+        return emit('repos.create', repos.create(name, input), {
+          next_actions: ['hubctl repos clone <repo>', 'hubctl repos show <repo>'],
+        })
+      })
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl repos` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface, mirroring
 // the root command tree.
-const subcommands = [listCommand, showCommand] as const
+const subcommands = [listCommand, showCommand, createCommand] as const
 
 interface GroupEntry {
   readonly name: string

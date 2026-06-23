@@ -59,9 +59,29 @@ export interface RepoDetail {
   readonly html_url: string
 }
 
+export interface CreateInput {
+  readonly org?: string
+  readonly description?: string
+  readonly private: boolean
+  readonly init: boolean
+  readonly gitignore?: string
+  readonly license?: string
+}
+
+// Summary returned after creating a repo (lib/hubctl/repos.rb#create surfaces
+// `full_name`/`clone_url`/`html_url`).
+export interface CreatedRepo {
+  readonly name: string
+  readonly full_name: string
+  readonly private: boolean
+  readonly clone_url: string
+  readonly html_url: string
+}
+
 export interface ReposShape {
   readonly list: (input: ListInput) => Effect.Effect<ReadonlyArray<RepoListItem>, GithubError>
   readonly show: (repo: string) => Effect.Effect<RepoDetail, GithubError>
+  readonly create: (name: string, input: CreateInput) => Effect.Effect<CreatedRepo, GithubError>
 }
 
 // Raw repo payload fields we read. `description`/`language` are nullable on the
@@ -108,6 +128,30 @@ const RepoFull = Schema.Struct({
 })
 
 const decodeFull = Schema.decodeUnknownSync(RepoFull)
+
+// Created-repo summary fields (lib/hubctl/repos.rb#create).
+const RepoCreated = Schema.Struct({
+  name: Schema.String,
+  full_name: Schema.String,
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  private: Schema.Boolean,
+  clone_url: Schema.String,
+  html_url: Schema.String,
+})
+
+const decodeCreated = Schema.decodeUnknownSync(RepoCreated)
+
+// Build the create-repo request body, mirroring the Ruby `create_options`
+// assembly: always send `description`/`private`/`auto_init`, and only include
+// the gitignore/license templates when the caller supplied them.
+const createBody = (name: string, input: CreateInput): Record<string, unknown> => ({
+  name,
+  ...(input.description === undefined ? {} : { description: input.description }),
+  private: input.private,
+  auto_init: input.init,
+  ...(input.gitignore === undefined ? {} : { gitignore_template: input.gitignore }),
+  ...(input.license === undefined ? {} : { license_template: input.license }),
+})
 
 const toDetail = (repo: typeof RepoFull.Type): RepoDetail => ({
   name: repo.name,
@@ -180,7 +224,16 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
           .request('GET /repos/{owner}/{repo}', splitRepo(repo))
           .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Repos.show'))
 
-      return { list, show }
+      const create: ReposShape['create'] = (name, input) => {
+        const org = O.fromNullishOr(input.org)
+        const body = createBody(name, input)
+        const effect = O.isSome(org)
+          ? github.request('POST /orgs/{org}/repos', { org: org.value, ...body })
+          : github.request('POST /user/repos', body)
+        return effect.pipe(Effect.map(decodeCreated), Effect.withSpan('Repos.create'))
+      }
+
+      return { list, show, create }
     })
   )
 }

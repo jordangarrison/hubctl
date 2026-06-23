@@ -145,4 +145,54 @@ describe('repos command', () => {
       })
     )
   })
+
+  describe('create', () => {
+    const created = {
+      name: 'newrepo',
+      full_name: 'octocat/newrepo',
+      private: false,
+      clone_url: 'https://github.com/octocat/newrepo.git',
+      html_url: 'https://github.com/octocat/newrepo',
+    }
+
+    it.effect('emits a repos.create envelope with the created summary', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['create', 'newrepo'], {
+          github: { routes: { 'POST /user/repos': created } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('repos.create')
+        expect(env.result).toMatchObject({ full_name: 'octocat/newrepo', clone_url: created.clone_url })
+        expect(env.next_actions).toContain('hubctl repos clone <repo>')
+      })
+    )
+
+    it.effect('defaults --init on (auto_init=true) and passes --private', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['create', 'newrepo', '--private'], {
+          github: {
+            routes: {
+              'POST /user/repos': (params: Record<string, unknown>) =>
+                params.auto_init === true && params.private === true ? created : { ...created, full_name: 'WRONG' },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ full_name: 'octocat/newrepo' })
+      })
+    )
+
+    it.effect('uses the org route when --org is set', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['create', 'newrepo', '--org', 'acme'], {
+          github: { routes: { 'POST /orgs/{org}/repos': created } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ full_name: 'octocat/newrepo' })
+      })
+    )
+  })
 })

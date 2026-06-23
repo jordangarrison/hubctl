@@ -175,4 +175,84 @@ describe('Repos service', () => {
       )
     )
   })
+
+  describe('create', () => {
+    const created = {
+      name: 'newrepo',
+      full_name: 'octocat/newrepo',
+      private: true,
+      clone_url: 'https://github.com/octocat/newrepo.git',
+      html_url: 'https://github.com/octocat/newrepo',
+    }
+
+    it.effect('creates a personal repo via POST /user/repos and returns the summary', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.create('newrepo', { private: true, init: true })
+        expect(result).toEqual({
+          name: 'newrepo',
+          full_name: 'octocat/newrepo',
+          private: true,
+          clone_url: 'https://github.com/octocat/newrepo.git',
+          html_url: 'https://github.com/octocat/newrepo',
+        })
+      }).pipe(
+        Effect.provide(Repos.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'POST /user/repos': created } }))))
+      )
+    )
+
+    it.effect('creates an org repo via POST /orgs/{org}/repos when org is set', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.create('newrepo', { org: 'acme', private: false, init: true })
+        expect(result.full_name).toBe('octocat/newrepo')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'POST /orgs/{org}/repos': (params: Record<string, unknown>) =>
+                    params.org === 'acme' && params.name === 'newrepo' && params.auto_init === true
+                      ? created
+                      : { ...created, full_name: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('forwards gitignore and license templates when provided', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.create('newrepo', {
+          private: false,
+          init: true,
+          description: 'desc',
+          gitignore: 'Node',
+          license: 'mit',
+        })
+        expect(result.name).toBe('newrepo')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'POST /user/repos': (params: Record<string, unknown>) =>
+                    params.gitignore_template === 'Node' &&
+                    params.license_template === 'mit' &&
+                    params.description === 'desc'
+                      ? created
+                      : { ...created, name: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
 })
