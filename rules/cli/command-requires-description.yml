@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+id: command-requires-description
+language: tsx
+severity: error
+message: Every Command.make(...) must carry a Command.withDescription(...) in its .pipe(...) chain.
+note: >-
+  The root command tree and each group's subcommand listing project commands to
+  their { name, description } for agent discovery. A command without a
+  description shows up blank, so a description is part of the command contract.
+files:
+  - src/cli/**
+rule:
+  pattern: Command.make($$$).pipe($$$)
+  not:
+    has:
+      pattern: Command.withDescription($$$)
+      stopBy: end

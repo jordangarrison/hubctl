@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+id: no-raw-stdout-in-cli
+language: tsx
+severity: error
+message: CLI command handlers must emit through the Output service (Output.ok/fail/stream via `emit`), never write to stdout directly.
+note: >-
+  Every src/cli/** handler renders the single result envelope through the Output
+  service. Raw console.log / Console.log / process.stdout.write bypasses the
+  envelope contract and breaks JSON-mode agent consumers.
+files:
+  - src/cli/**
+rule:
+  any:
+    - pattern: console.log($$$)
+    - pattern: console.error($$$)
+    - pattern: Console.log($$$)
+    - pattern: Console.error($$$)
+    - pattern: process.stdout.write($$$)
+    - pattern: process.stderr.write($$$)
