@@ -438,4 +438,25 @@ describe('Enterprise service', () => {
       )
     )
   })
+
+  describe('stats', () => {
+    it.effect('returns the raw enterprise stats payload', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.stats(enterprise)
+        expect(result).toEqual({ repos: { total_repos: 100 }, users: { total_users: 50 } })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /enterprises/{enterprise}/stats/all': {
+                repos: { total_repos: 100 },
+                users: { total_users: 50 },
+              },
+            },
+          })
+        )
+      )
+    )
+  })
 })

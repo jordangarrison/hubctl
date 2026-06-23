@@ -512,6 +512,21 @@ const ssoCommand = Command.make('sso').pipe(
   Command.withSubcommands(ssoSubcommands)
 )
 
+// === stats ===
+
+const statsCommand = Command.make('stats', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise statistics'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.stats', ent.stats(enterprise), {
+          next_actions: ['hubctl enterprise billing usage <enterprise>'],
+        })
+      )
+    )
+  )
+)
+
 // === group discovery ===
 
 const subcommands = [
@@ -522,6 +537,7 @@ const subcommands = [
   licensesCommand,
   auditLogCommand,
   ssoCommand,
+  statsCommand,
 ] as const
 
 export const enterpriseCommand = (): Command.Command<

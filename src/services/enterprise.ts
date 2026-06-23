@@ -271,6 +271,9 @@ export interface EnterpriseShape {
   // Raw consumed-licenses payload (lib/hubctl/github_client.rb
   // #enterprise_consumed_licenses) — a single page, emitted verbatim.
   readonly consumedLicenses: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
+  // Raw enterprise statistics payload (lib/hubctl/enterprise.rb#stats), emitted
+  // verbatim — the Ruby only formats it for the table view.
+  readonly stats: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
   readonly members: (
     enterprise: string,
     input: MembersInput
@@ -719,6 +722,11 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .request('GET /enterprises/{enterprise}/consumed-licenses', { enterprise })
           .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.consumedLicenses'))
 
+      const stats: EnterpriseShape['stats'] = (enterprise) =>
+        github
+          .request('GET /enterprises/{enterprise}/stats/all', { enterprise })
+          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.stats'))
+
       const owners: EnterpriseShape['owners'] = (enterprise) =>
         fetchAllUsers(enterprise).pipe(
           Effect.map((users) => users.filter(isOwner).map(transformMember)),
@@ -777,6 +785,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         packagesBilling,
         sharedStorageBilling,
         consumedLicenses,
+        stats,
         auditLog,
         listSsoAuthorizations,
         showSsoAuthorization,

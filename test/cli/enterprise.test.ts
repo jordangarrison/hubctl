@@ -390,4 +390,17 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('stats', () => {
+    it.effect('emits the raw stats payload', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['stats', 'acme'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/stats/all': { repos: { total_repos: 100 } } } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.stats')
+        expect(env.result).toMatchObject({ repos: { total_repos: 100 } })
+      })
+    )
+  })
 })
