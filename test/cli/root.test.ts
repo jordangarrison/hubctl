@@ -40,12 +40,16 @@ describe('root command', () => {
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('version')
       expect(names).toContain('repos')
+      expect(names).toContain('orgs')
 
       const version = tree.commands.find((c) => c.name === 'version')
       expect(version?.description.length).toBeGreaterThan(0)
 
       const repos = tree.commands.find((c) => c.name === 'repos')
       expect(repos?.description.length).toBeGreaterThan(0)
+
+      const orgs = tree.commands.find((c) => c.name === 'orgs')
+      expect(orgs?.description.length).toBeGreaterThan(0)
     })
   )
 
