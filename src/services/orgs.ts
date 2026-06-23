@@ -79,30 +79,10 @@ export interface MembersInput {
   readonly twoFaDisabled?: boolean
 }
 
-export interface InviteInput {
-  readonly role?: string
-  readonly teamIds?: ReadonlyArray<number>
-}
-
-// Outcome of an invitation (lib/hubctl/orgs.rb#invite via github_client).
-export interface InviteResult {
-  readonly id: number
-  readonly invited: string
-}
-
-// Outcome of removing a member.
-export interface RemoveResult {
-  readonly org: string
-  readonly user: string
-  readonly removed: boolean
-}
-
 export interface OrgsShape {
   readonly list: Effect.Effect<ReadonlyArray<OrgListItem>, GithubError>
   readonly show: (org: string) => Effect.Effect<OrgDetail, GithubError>
   readonly members: (org: string, input: MembersInput) => Effect.Effect<ReadonlyArray<OrgMember>, GithubError>
-  readonly invite: (org: string, target: string, input: InviteInput) => Effect.Effect<InviteResult, GithubError>
-  readonly remove: (org: string, user: string) => Effect.Effect<RemoveResult, GithubError>
 }
 
 // Raw org summary fields read by `list`. `description` is nullable on the wire;
@@ -203,25 +183,6 @@ const memberParams = (input: MembersInput): Record<string, unknown> => ({
   ...(input.twoFaDisabled === true ? { filter: '2fa_disabled' } : {}),
 })
 
-// The user-lookup payload for inviting by username (only the numeric id matters).
-const UserId = Schema.Struct({ id: Schema.Finite })
-const decodeUserId = Schema.decodeUnknownSync(UserId)
-
-// The invitation response carries the new invitation id.
-const Invitation = Schema.Struct({ id: Schema.Finite })
-const decodeInvitation = Schema.decodeUnknownSync(Invitation)
-
-// Extra invitation body fields (role/team_ids) only included when supplied,
-// mirroring the Ruby's options merge.
-const inviteOptions = (input: InviteInput): Record<string, unknown> => ({
-  ...(input.role === undefined ? {} : { role: input.role }),
-  ...(input.teamIds === undefined ? {} : { team_ids: input.teamIds }),
-})
-
-// Whether the invite target looks like an email (vs a username) — mirrors the
-// Ruby `email_or_username.include?('@')` branch.
-const isEmail = (target: string): boolean => target.includes('@')
-
 const toListItem = (org: typeof OrgSummary.Type): OrgListItem => ({
   login: org.login,
   id: org.id,
@@ -257,26 +218,7 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
           Effect.withSpan('Orgs.members')
         )
 
-      const invite: OrgsShape['invite'] = (org, target, input) => {
-        const options = inviteOptions(input)
-        const body: Effect.Effect<Record<string, unknown>, GithubError> = isEmail(target)
-          ? Effect.succeed({ email: target, ...options })
-          : github
-              .request('GET /users/{username}', { username: target })
-              .pipe(Effect.map((raw) => ({ invitee_id: decodeUserId(raw).id, ...options })))
-        return body.pipe(
-          Effect.flatMap((payload) => github.request('POST /orgs/{org}/invitations', { org, ...payload })),
-          Effect.map((raw) => ({ id: decodeInvitation(raw).id, invited: target })),
-          Effect.withSpan('Orgs.invite')
-        )
-      }
-
-      const remove: OrgsShape['remove'] = (org, user) =>
-        github
-          .request('DELETE /orgs/{org}/members/{username}', { org, username: user })
-          .pipe(Effect.as({ org, user, removed: true }), Effect.withSpan('Orgs.remove'))
-
-      return { list, show, members, invite, remove }
+      return { list, show, members }
     })
   )
 }

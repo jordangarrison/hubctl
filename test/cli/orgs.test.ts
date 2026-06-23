@@ -82,8 +82,9 @@ describe('orgs command', () => {
       expect(names).toContain('list')
       expect(names).toContain('show')
       expect(names).toContain('members')
-      expect(names).toContain('invite')
-      expect(names).toContain('remove')
+      // invite/remove are NOT part of the Ruby `orgs` group (they live in `users`).
+      expect(names).not.toContain('invite')
+      expect(names).not.toContain('remove')
     })
   )
 
@@ -175,73 +176,6 @@ describe('orgs command', () => {
 
         expect(env.ok).toBe(true)
         expect(env.result).toMatchObject([{ login: 'octocat' }])
-      })
-    )
-  })
-
-  describe('invite', () => {
-    const invitation = { id: 7 }
-
-    it.effect('invites by email and emits an orgs.invite envelope', () =>
-      Effect.gen(function* () {
-        const env = yield* runCli(orgsCommand, ['invite', 'person@example.com', '--org', 'acme'], {
-          github: {
-            routes: {
-              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
-                params.email === 'person@example.com' ? invitation : { id: -1 },
-            },
-          },
-        })
-
-        expect(env.ok).toBe(true)
-        expect(env.command).toBe('orgs.invite')
-        expect(env.result).toMatchObject({ id: 7, invited: 'person@example.com' })
-      })
-    )
-
-    it.effect('invites by username via the user-id lookup', () =>
-      Effect.gen(function* () {
-        const env = yield* runCli(orgsCommand, ['invite', 'newbie', '--org', 'acme'], {
-          github: {
-            routes: {
-              'GET /users/{username}': { id: 99 },
-              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
-                params.invitee_id === 99 ? invitation : { id: -1 },
-            },
-          },
-        })
-
-        expect(env.ok).toBe(true)
-        expect(env.result).toMatchObject({ id: 7, invited: 'newbie' })
-      })
-    )
-  })
-
-  describe('remove', () => {
-    it.effect('in json mode without --yes fails with a re-run fix and does NOT call the API', () =>
-      Effect.gen(function* () {
-        const env = yield* runCli(orgsCommand, ['remove', 'octocat', '--org', 'acme'], {
-          // No DELETE route registered: if the handler hit the API it would die on
-          // the missing fixture, so reaching an ok:false envelope proves it gated.
-          github: {},
-        })
-
-        expect(env.ok).toBe(false)
-        expect(env.command).toBe('orgs.remove')
-        expect(env.result).toBeNull()
-        expect(env.fix).toContain('--yes')
-      })
-    )
-
-    it.effect('in json mode with --yes removes the member', () =>
-      Effect.gen(function* () {
-        const env = yield* runCli(orgsCommand, ['remove', 'octocat', '--org', 'acme', '--yes'], {
-          github: { routes: { 'DELETE /orgs/{org}/members/{username}': {} } },
-        })
-
-        expect(env.ok).toBe(true)
-        expect(env.command).toBe('orgs.remove')
-        expect(env.result).toMatchObject({ org: 'acme', user: 'octocat', removed: true })
       })
     )
   })
