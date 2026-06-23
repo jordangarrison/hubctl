@@ -288,6 +288,92 @@ describe('teams command', () => {
     )
   })
 
+  describe('org resolution (require_org! parity)', () => {
+    const CONFIG_PATH = '/home/test-user/.config/hubctl/config.json'
+
+    // `GET /orgs/{org}/teams` route that only returns the team when the org in
+    // the path params matches `expected`, so the resolved org can be asserted.
+    const teamsFor = (expected: string) => ({
+      'GET /orgs/{org}/teams': (params: Record<string, unknown>) =>
+        params.org === expected ? [teamPayload] : [{ ...teamPayload, slug: 'WRONG' }],
+    })
+
+    it.effect('explicit --org wins over GITHUB_ORG env and default_org config', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['list', '--org', 'flagorg'], {
+          github: { routes: teamsFor('flagorg') },
+          config: { env: { GITHUB_ORG: 'envorg' }, files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(decodeList(env.result)[0]?.slug).toBe('core')
+      })
+    )
+
+    it.effect('falls back to GITHUB_ORG env when --org is omitted', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['list'], {
+          github: { routes: teamsFor('envorg') },
+          config: { env: { GITHUB_ORG: 'envorg' }, files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(decodeList(env.result)[0]?.slug).toBe('core')
+      })
+    )
+
+    it.effect('falls back to default_org config when --org and env are absent', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['list'], {
+          github: { routes: teamsFor('fileorg') },
+          config: { files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(decodeList(env.result)[0]?.slug).toBe('core')
+      })
+    )
+
+    it.effect('fails with a helpful envelope when org cannot be resolved', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['list'], { github: {}, config: {} })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.list')
+        expect(env.error?.code).toBe('ValidationError')
+        expect(env.error?.message).toContain('Organization is required')
+        expect(env.fix).toContain('--org')
+        expect(env.fix).toContain('GITHUB_ORG')
+        expect(env.fix).toContain('default_org')
+      })
+    )
+
+    it.effect('remove without --yes still resolves org from config before gating', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['remove', 'core', 'octocat'], {
+          github: {},
+          config: { files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        // org resolved (no MissingOption defect); gated on --yes, not org.
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.remove')
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('remove fails with the org envelope when org cannot be resolved', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['remove', 'core', 'octocat'], { github: {}, config: {} })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.remove')
+        expect(env.error?.code).toBe('ValidationError')
+        expect(env.error?.message).toContain('Organization is required')
+      })
+    )
+  })
+
   describe('remove', () => {
     it.effect('in json mode without --yes fails with a re-run fix and does NOT call the API', () =>
       Effect.gen(function* () {

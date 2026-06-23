@@ -4,24 +4,29 @@ import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
+import type { Config } from '../services/config'
 import { Teams } from '../services/teams'
 import type { CreateInput } from '../services/teams'
-import { emit } from './handle'
+import { emit, resolveOrg } from './handle'
 
 // The `teams` command group. Commands stay THIN: parse Flags/Arguments, call the
 // `Teams` service, then hand the result (or typed GithubError) to `emit`, which
 // renders the single envelope via `Output`. Mirrors lib/hubctl/teams.rb.
 
-// Org is required for every team operation (Ruby `require_org!`); modeled here as
-// a required `--org` flag (matching the `orgs invite`/`remove` flag style).
-const orgFlag = Flag.string('org').pipe(Flag.withDescription('Organization name'))
+// Org is required for every team operation (Ruby `require_org!`). `--org` is
+// optional here: when omitted it falls back to GITHUB_ORG env then the config
+// file's `default_org` (see `resolveOrg`), failing only if none resolve.
+const orgFlag = Flag.string('org').pipe(
+  Flag.optional,
+  Flag.withDescription('Organization name (defaults to GITHUB_ORG or default_org config)')
+)
 
 const listCommand = Command.make('list', { org: orgFlag }).pipe(
   Command.withDescription('List teams in organization'),
   Command.withHandler(({ org }) =>
     Teams.pipe(
       Effect.flatMap((teams) =>
-        emit('teams.list', teams.list(org), {
+        emit('teams.list', resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.list(resolved))), {
           next_actions: ['hubctl teams members <team> --org <org>', 'hubctl teams create <name> --org <org>'],
         })
       )
@@ -57,9 +62,11 @@ const createCommand = Command.make('create', {
           privacy,
           permission,
         }
-        return emit('teams.create', teams.create(org, name, input), {
-          next_actions: ['hubctl teams members <team> --org <org>', 'hubctl teams add <team> <user> --org <org>'],
-        })
+        return emit(
+          'teams.create',
+          resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.create(resolved, name, input))),
+          { next_actions: ['hubctl teams members <team> --org <org>', 'hubctl teams add <team> <user> --org <org>'] }
+        )
       })
     )
   )
@@ -72,7 +79,7 @@ const membersCommand = Command.make('members', { team: teamArg, org: orgFlag }).
   Command.withHandler(({ org, team }) =>
     Teams.pipe(
       Effect.flatMap((teams) =>
-        emit('teams.members', teams.members(org, team), {
+        emit('teams.members', resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.members(resolved, team))), {
           next_actions: ['hubctl teams add <team> <user> --org <org>', 'hubctl teams list --org <org>'],
         })
       )
@@ -85,7 +92,7 @@ const showCommand = Command.make('show', { team: teamArg, org: orgFlag }).pipe(
   Command.withHandler(({ org, team }) =>
     Teams.pipe(
       Effect.flatMap((teams) =>
-        emit('teams.show', teams.show(org, team), {
+        emit('teams.show', resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.show(resolved, team))), {
           next_actions: ['hubctl teams members <team> --org <org>', 'hubctl teams add <team> <user> --org <org>'],
         })
       )
@@ -104,7 +111,7 @@ const addCommand = Command.make('add', { team: teamArg, user: userArg, org: orgF
   Command.withHandler(({ org, role, team, user }) =>
     Teams.pipe(
       Effect.flatMap((teams) =>
-        emit('teams.add', teams.add(org, team, user, role), {
+        emit('teams.add', resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.add(resolved, team, user, role))), {
           next_actions: ['hubctl teams members <team> --org <org>'],
         })
       )
@@ -143,10 +150,18 @@ const removeCommand = Command.make('remove', { team: teamArg, user: userArg, org
     Effect.gen(function* () {
       const output = yield* Output
       const teams = yield* Teams
+      // Resolve `--org`/GITHUB_ORG/default_org first; an unresolved org fails
+      // with a `ValidationError` rendered as the standard `ok:false` envelope.
+      const resolved = yield* resolveOrg(org).pipe(Effect.option)
+      if (O.isNone(resolved)) {
+        yield* emit('teams.remove', resolveOrg(org), { next_actions: removeNextActions })
+        return
+      }
+      const orgName = resolved.value
       const confirmed = yield* confirmRemove(team, user, yes, output)
 
       if (confirmed) {
-        yield* emit('teams.remove', teams.remove(org, team, user), { next_actions: removeNextActions })
+        yield* emit('teams.remove', teams.remove(orgName, team, user), { next_actions: removeNextActions })
         return
       }
 
@@ -183,7 +198,7 @@ export const teamsCommand = (): Command.Command<
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Teams
+  Output | Teams | Config
 > =>
   Command.make('teams').pipe(
     Command.withDescription('Manage teams'),

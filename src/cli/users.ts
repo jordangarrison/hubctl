@@ -4,16 +4,22 @@ import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
+import type { Config } from '../services/config'
 import { Users } from '../services/users'
 import type { InviteInput, ListInput } from '../services/users'
-import { emit } from './handle'
+import { emit, resolveOrg } from './handle'
 
 // The `users` command group. Commands stay THIN: parse Flags/Arguments, call the
 // `Users` service, then hand the result (or typed GithubError) to `emit`, which
 // renders the single envelope via `Output`. Mirrors lib/hubctl/users.rb.
 
 const userArg = Argument.string('user').pipe(Argument.withDescription('GitHub username'))
-const orgFlag = Flag.string('org').pipe(Flag.withDescription('Organization login'))
+// `--org` is optional: when omitted it falls back to GITHUB_ORG env then the
+// config file's `default_org` (Ruby `require_org!`, see `resolveOrg`).
+const orgFlag = Flag.string('org').pipe(
+  Flag.optional,
+  Flag.withDescription('Organization login (defaults to GITHUB_ORG or default_org config)')
+)
 
 const showCommand = Command.make('show', { user: userArg }).pipe(
   Command.withDescription('Show details for a specific user'),
@@ -52,7 +58,7 @@ const listCommand = Command.make('list', { org: orgFlag, role: roleFlag }).pipe(
     Users.pipe(
       Effect.flatMap((users) => {
         const input: ListInput = { role }
-        return emit('users.list', users.list(org, input), {
+        return emit('users.list', resolveOrg(org).pipe(Effect.flatMap((resolved) => users.list(resolved, input))), {
           next_actions: ['hubctl users show <user>'],
         })
       })
@@ -96,9 +102,11 @@ const inviteCommand = Command.make('invite', {
           ...O.match(role, { onNone: () => ({}), onSome: (v) => ({ role: v }) }),
           ...O.match(team, { onNone: () => ({}), onSome: (v) => ({ teamIds: v }) }),
         }
-        return emit('users.invite', users.invite(org, target, input), {
-          next_actions: ['hubctl users list --org <org>'],
-        })
+        return emit(
+          'users.invite',
+          resolveOrg(org).pipe(Effect.flatMap((resolved) => users.invite(resolved, target, input))),
+          { next_actions: ['hubctl users list --org <org>'] }
+        )
       })
     )
   )
@@ -135,10 +143,18 @@ const removeCommand = Command.make('remove', { user: userArg, org: orgFlag, yes:
     Effect.gen(function* () {
       const output = yield* Output
       const users = yield* Users
-      const confirmed = yield* confirmRemove(org, user, yes, output)
+      // Resolve `--org`/GITHUB_ORG/default_org first; an unresolved org fails
+      // with a `ValidationError` rendered as the standard `ok:false` envelope.
+      const resolved = yield* resolveOrg(org).pipe(Effect.option)
+      if (O.isNone(resolved)) {
+        yield* emit('users.remove', resolveOrg(org), { next_actions: removeNextActions })
+        return
+      }
+      const orgName = resolved.value
+      const confirmed = yield* confirmRemove(orgName, user, yes, output)
 
       if (confirmed) {
-        yield* emit('users.remove', users.remove(org, user), { next_actions: removeNextActions })
+        yield* emit('users.remove', users.remove(orgName, user), { next_actions: removeNextActions })
         return
       }
 
@@ -147,10 +163,10 @@ const removeCommand = Command.make('remove', { user: userArg, org: orgFlag, yes:
       yield* output.mode === 'json'
         ? output.fail('users.remove', {
             code: 'confirmation_required',
-            message: `Removing ${user} from ${org} is destructive and was not confirmed`,
+            message: `Removing ${user} from ${orgName} is destructive and was not confirmed`,
             fix: 're-run with --yes',
           })
-        : output.ok('users.remove', { org, user, removed: false, cancelled: true })
+        : output.ok('users.remove', { org: orgName, user, removed: false, cancelled: true })
     })
   )
 )
@@ -175,7 +191,7 @@ export const usersCommand = (): Command.Command<
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Users
+  Output | Users | Config
 > =>
   Command.make('users').pipe(
     Command.withDescription('Manage users'),

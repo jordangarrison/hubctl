@@ -105,6 +105,15 @@ describe('users command', () => {
       html_url: 'https://github.com/octocat',
     }
 
+    // `GET /orgs/{org}/members` route that echoes which org was passed in the
+    // path params, so org-resolution tests can assert the resolved value.
+    const memberFor = (org: string) => ({
+      'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
+        params.org === org ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+    })
+
+    const CONFIG_PATH = '/home/test-user/.config/hubctl/config.json'
+
     it.effect('emits a users.list envelope with shaped member rows', () =>
       Effect.gen(function* () {
         const env = yield* runCli(usersCommand, ['list', '--org', 'acme'], {
@@ -114,6 +123,56 @@ describe('users command', () => {
         expect(env.ok).toBe(true)
         expect(env.command).toBe('users.list')
         expect(env.result).toMatchObject([{ login: 'octocat', id: 1, type: 'User', site_admin: false }])
+      })
+    )
+
+    it.effect('explicit --org wins over GITHUB_ORG env and default_org config', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(usersCommand, ['list', '--org', 'flagorg'], {
+          github: { routes: memberFor('flagorg') },
+          config: { env: { GITHUB_ORG: 'envorg' }, files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+
+    it.effect('falls back to GITHUB_ORG env when --org is omitted', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(usersCommand, ['list'], {
+          github: { routes: memberFor('envorg') },
+          config: { env: { GITHUB_ORG: 'envorg' }, files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+
+    it.effect('falls back to default_org config when --org and env are absent', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(usersCommand, ['list'], {
+          github: { routes: memberFor('fileorg') },
+          config: { files: { [CONFIG_PATH]: '{"default_org":"fileorg"}' } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+
+    it.effect('fails with a helpful envelope when org cannot be resolved', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(usersCommand, ['list'], { github: {}, config: {} })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('users.list')
+        expect(env.error?.code).toBe('ValidationError')
+        expect(env.error?.message).toContain('Organization is required')
+        expect(env.fix).toContain('--org')
+        expect(env.fix).toContain('GITHUB_ORG')
+        expect(env.fix).toContain('default_org')
       })
     )
   })
