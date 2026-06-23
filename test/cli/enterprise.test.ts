@@ -396,14 +396,24 @@ describe('enterprise command', () => {
   })
 
   describe('stats', () => {
-    it.effect('emits the raw stats payload', () =>
+    it.effect('emits the labeled stats report sections', () =>
       Effect.gen(function* () {
         const env = yield* runCli(enterpriseCommand, ['stats', 'acme'], {
-          github: { routes: { 'GET /enterprises/{enterprise}/stats/all': { repos: { total_repos: 100 } } } },
+          github: {
+            routes: {
+              'GET /enterprises/{enterprise}/stats/all': {
+                repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+                pulls: { total_pulls: 200, merged_pulls: 150, mergeable_pulls: 30, unmergeable_pulls: 20 },
+              },
+            },
+          },
         })
         expect(env.ok).toBe(true)
         expect(env.command).toBe('enterprise.stats')
-        expect(env.result).toMatchObject({ repos: { total_repos: 100 } })
+        expect(env.result).toMatchObject({
+          repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+          pull_requests: { total_pulls: 200, merged_pulls: 150, mergeable_pulls: 30, unmergeable_pulls: 20 },
+        })
       })
     )
   })

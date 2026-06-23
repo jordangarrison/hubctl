@@ -261,6 +261,70 @@ export interface UpdateSecurityResult {
   readonly updated: boolean
 }
 
+// === Stats ===
+
+// Labeled stats report sections (lib/hubctl/enterprise.rb#stats). Each section
+// is present only when the raw `/stats/all` payload carries it, and carries the
+// exact field set the Ruby report prints.
+export interface ReposStats {
+  readonly total_repos: number
+  readonly root_repos: number
+  readonly fork_repos: number
+  readonly org_repos: number
+}
+export interface HooksStats {
+  readonly total_hooks: number
+  readonly active_hooks: number
+  readonly inactive_hooks: number
+}
+export interface PagesStats {
+  readonly total_pages: number
+}
+export interface OrgsStats {
+  readonly total_orgs: number
+  readonly disabled_orgs: number
+  readonly total_teams: number
+  readonly total_team_members: number
+}
+export interface UsersStats {
+  readonly total_users: number
+  readonly admin_users: number
+  readonly suspended_users: number
+}
+export interface PullRequestsStats {
+  readonly total_pulls: number
+  readonly merged_pulls: number
+  readonly mergeable_pulls: number
+  readonly unmergeable_pulls: number
+}
+export interface IssuesStats {
+  readonly total_issues: number
+  readonly open_issues: number
+  readonly closed_issues: number
+}
+export interface MilestonesStats {
+  readonly total_milestones: number
+  readonly open_milestones: number
+  readonly closed_milestones: number
+}
+export interface GistsStats {
+  readonly total_gists: number
+  readonly private_gists: number
+  readonly public_gists: number
+}
+
+export interface EnterpriseStats {
+  readonly repos?: ReposStats
+  readonly hooks?: HooksStats
+  readonly pages?: PagesStats
+  readonly orgs?: OrgsStats
+  readonly users?: UsersStats
+  readonly pull_requests?: PullRequestsStats
+  readonly issues?: IssuesStats
+  readonly milestones?: MilestonesStats
+  readonly gists?: GistsStats
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
   readonly listSsoAuthorizations: (enterprise: string) => Effect.Effect<ReadonlyArray<SsoAuthorization>, GithubError>
@@ -284,9 +348,10 @@ export interface EnterpriseShape {
   // Raw consumed-licenses payload (lib/hubctl/github_client.rb
   // #enterprise_consumed_licenses) — a single page, emitted verbatim.
   readonly consumedLicenses: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
-  // Raw enterprise statistics payload (lib/hubctl/enterprise.rb#stats), emitted
-  // verbatim — the Ruby only formats it for the table view.
-  readonly stats: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
+  // Labeled enterprise statistics report (lib/hubctl/enterprise.rb#stats): the
+  // raw `/stats/all` payload shaped into the Ruby's labeled sections, present
+  // sections only.
+  readonly stats: (enterprise: string) => Effect.Effect<EnterpriseStats, GithubError>
   // Security-analysis settings get/update (lib/hubctl/enterprise.rb#security).
   // `securityAnalysis` returns the raw settings; `updateSecurityAnalysis` PATCHes
   // the supplied flags and confirms.
@@ -491,6 +556,102 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
 // the Ruby emits verbatim).
 const RawObject = Schema.Record(Schema.String, Schema.Unknown)
 const decodeRawObject = Schema.decodeUnknownSync(RawObject)
+
+// === Stats helpers ===
+
+// Raw `/stats/all` payload. Every section is optional; within a present
+// section the Ruby reads a fixed field set, treating absent numbers as 0.
+const Num = Schema.optional(Schema.NullOr(Schema.Finite))
+const StatsRaw = Schema.Struct({
+  repos: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_repos: Num, root_repos: Num, fork_repos: Num, org_repos: Num }))
+  ),
+  hooks: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_hooks: Num, active_hooks: Num, inactive_hooks: Num }))
+  ),
+  pages: Schema.optional(Schema.NullOr(Schema.Struct({ total_pages: Num }))),
+  orgs: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ total_orgs: Num, disabled_orgs: Num, total_teams: Num, total_team_members: Num })
+    )
+  ),
+  users: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_users: Num, admin_users: Num, suspended_users: Num }))
+  ),
+  pulls: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ total_pulls: Num, merged_pulls: Num, mergeable_pulls: Num, unmergeable_pulls: Num })
+    )
+  ),
+  issues: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_issues: Num, open_issues: Num, closed_issues: Num }))
+  ),
+  milestones: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_milestones: Num, open_milestones: Num, closed_milestones: Num }))
+  ),
+  gists: Schema.optional(
+    Schema.NullOr(Schema.Struct({ total_gists: Num, private_gists: Num, public_gists: Num }))
+  ),
+})
+const decodeStats = Schema.decodeUnknownSync(StatsRaw)
+
+// Emit `{ [key]: shape(section) }` only when the section is present, otherwise
+// an empty fragment — the spread builds the labeled report (present sections
+// only), mirroring the Ruby per-section `if stats[:section]` guards in #stats.
+// Absent numeric fields default to 0 within `shape` (the Ruby interpolates a nil
+// field as the zero/empty value).
+const section = <S, T>(raw: S, key: string, shape: (s: NonNullable<S>) => T): Record<string, T> =>
+  O.match(O.fromNullishOr(raw), { onNone: () => ({}), onSome: (s) => ({ [key]: shape(s) }) })
+
+// Shape the raw payload into the Ruby's labeled report (lib/hubctl/enterprise.rb
+// #stats). The Ruby emits a section only when present; the wire `pulls` section
+// is surfaced as `pull_requests` (the Ruby report's label).
+const toStats = (raw: typeof StatsRaw.Type): EnterpriseStats => ({
+  ...section(raw.repos, 'repos', (s) => ({
+    total_repos: s.total_repos ?? 0,
+    root_repos: s.root_repos ?? 0,
+    fork_repos: s.fork_repos ?? 0,
+    org_repos: s.org_repos ?? 0,
+  })),
+  ...section(raw.hooks, 'hooks', (s) => ({
+    total_hooks: s.total_hooks ?? 0,
+    active_hooks: s.active_hooks ?? 0,
+    inactive_hooks: s.inactive_hooks ?? 0,
+  })),
+  ...section(raw.pages, 'pages', (s) => ({ total_pages: s.total_pages ?? 0 })),
+  ...section(raw.orgs, 'orgs', (s) => ({
+    total_orgs: s.total_orgs ?? 0,
+    disabled_orgs: s.disabled_orgs ?? 0,
+    total_teams: s.total_teams ?? 0,
+    total_team_members: s.total_team_members ?? 0,
+  })),
+  ...section(raw.users, 'users', (s) => ({
+    total_users: s.total_users ?? 0,
+    admin_users: s.admin_users ?? 0,
+    suspended_users: s.suspended_users ?? 0,
+  })),
+  ...section(raw.pulls, 'pull_requests', (s) => ({
+    total_pulls: s.total_pulls ?? 0,
+    merged_pulls: s.merged_pulls ?? 0,
+    mergeable_pulls: s.mergeable_pulls ?? 0,
+    unmergeable_pulls: s.unmergeable_pulls ?? 0,
+  })),
+  ...section(raw.issues, 'issues', (s) => ({
+    total_issues: s.total_issues ?? 0,
+    open_issues: s.open_issues ?? 0,
+    closed_issues: s.closed_issues ?? 0,
+  })),
+  ...section(raw.milestones, 'milestones', (s) => ({
+    total_milestones: s.total_milestones ?? 0,
+    open_milestones: s.open_milestones ?? 0,
+    closed_milestones: s.closed_milestones ?? 0,
+  })),
+  ...section(raw.gists, 'gists', (s) => ({
+    total_gists: s.total_gists ?? 0,
+    private_gists: s.private_gists ?? 0,
+    public_gists: s.public_gists ?? 0,
+  })),
+})
 
 // === SAML SSO helpers ===
 
@@ -760,7 +921,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
       const stats: EnterpriseShape['stats'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/stats/all', { enterprise })
-          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.stats'))
+          .pipe(Effect.map(decodeStats), Effect.map(toStats), Effect.withSpan('Enterprise.stats'))
 
       const securityAnalysis: EnterpriseShape['securityAnalysis'] = (enterprise) =>
         github

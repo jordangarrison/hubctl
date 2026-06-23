@@ -440,18 +440,61 @@ describe('Enterprise service', () => {
   })
 
   describe('stats', () => {
-    it.effect('returns the raw enterprise stats payload', () =>
+    // Mirrors lib/hubctl/enterprise.rb#stats: the Ruby reads a fixed set of
+    // labeled fields per section and only emits sections present in the payload.
+    // The service shapes the raw `/stats/all` payload into that same labeled
+    // report (present sections only, picking the Ruby's field set).
+    it.effect('shapes the stats payload into the labeled report sections', () =>
       Effect.gen(function* () {
         const ent = yield* Enterprise
         const result = yield* ent.stats(enterprise)
-        expect(result).toEqual({ repos: { total_repos: 100 }, users: { total_users: 50 } })
+        expect(result).toEqual({
+          repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+          hooks: { total_hooks: 5, active_hooks: 4, inactive_hooks: 1 },
+          pages: { total_pages: 3 },
+          orgs: { total_orgs: 10, disabled_orgs: 1, total_teams: 25, total_team_members: 300 },
+          users: { total_users: 50, admin_users: 5, suspended_users: 2 },
+          pull_requests: { total_pulls: 200, merged_pulls: 150, mergeable_pulls: 30, unmergeable_pulls: 20 },
+          issues: { total_issues: 400, open_issues: 100, closed_issues: 300 },
+          milestones: { total_milestones: 15, open_milestones: 5, closed_milestones: 10 },
+          gists: { total_gists: 40, private_gists: 12, public_gists: 28 },
+        })
       }).pipe(
         Effect.provide(
           withRoutes({
             routes: {
               'GET /enterprises/{enterprise}/stats/all': {
-                repos: { total_repos: 100 },
-                users: { total_users: 50 },
+                repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+                hooks: { total_hooks: 5, active_hooks: 4, inactive_hooks: 1 },
+                pages: { total_pages: 3 },
+                orgs: { total_orgs: 10, disabled_orgs: 1, total_teams: 25, total_team_members: 300 },
+                users: { total_users: 50, admin_users: 5, suspended_users: 2 },
+                pulls: { total_pulls: 200, merged_pulls: 150, mergeable_pulls: 30, unmergeable_pulls: 20 },
+                issues: { total_issues: 400, open_issues: 100, closed_issues: 300 },
+                milestones: { total_milestones: 15, open_milestones: 5, closed_milestones: 10 },
+                gists: { total_gists: 40, private_gists: 12, public_gists: 28 },
+              },
+            },
+          })
+        )
+      )
+    )
+
+    it.effect('omits sections absent from the payload', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.stats(enterprise)
+        expect(result).toEqual({
+          repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+          users: { total_users: 50, admin_users: 5, suspended_users: 2 },
+        })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /enterprises/{enterprise}/stats/all': {
+                repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
+                users: { total_users: 50, admin_users: 5, suspended_users: 2 },
               },
             },
           })
