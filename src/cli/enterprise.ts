@@ -4,10 +4,12 @@ import * as Stream from 'effect/Stream'
 import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
+import type { Mode } from '../output/mode'
 import { Output } from '../output/service'
-import { Enterprise } from '../services/enterprise'
+import { Enterprise, flattenBilling } from '../services/enterprise'
 import type {
   AuditLogInput,
+  BillingResult,
   CreateOrgInput,
   MembersInput,
   OrganizationsInput,
@@ -345,28 +347,42 @@ const ownersCommand = Command.make('owners').pipe(
 
 const billingNextActions = ['hubctl enterprise billing packages <enterprise>']
 
+// Shape a `BillingResult` for the resolved output mode, mirroring the Ruby
+// `billing` command's mode branch (lib/hubctl/enterprise.rb:376-389): JSON gets
+// the structured summary (or the empty marker); pretty/table gets the flattened
+// `category/metric/value` rows (`flatten_billing_summary`) or, for an empty
+// usage payload, the Ruby's "No billing usage data found" info message.
+export const billingPayload = (mode: Mode, result: BillingResult): unknown => {
+  if (result.kind === 'empty') {
+    return mode === 'json' ? result : { message: `No billing usage data found for enterprise ${result.enterprise}` }
+  }
+  return mode === 'json' ? result : flattenBilling(result)
+}
+
+// Run the billing service call and emit the mode-shaped payload. A typed
+// GithubError still flows to `Output.fail`; success renders the structured
+// summary (json) or flattened table / empty message (pretty).
+const emitBilling = (command: string, enterprise: string): Effect.Effect<void, never, Output | Enterprise> =>
+  Effect.gen(function* () {
+    const output = yield* Output
+    const ent = yield* Enterprise
+    yield* Effect.matchEffect(ent.billing(enterprise), {
+      onFailure: (error) => output.fail(command, error),
+      onSuccess: (result) =>
+        output.ok(command, billingPayload(output.mode, result), { next_actions: billingNextActions }),
+    })
+  })
+
 const usageCommand = Command.make('usage', { enterprise: enterpriseArg }).pipe(
   Command.withDescription('Show enterprise usage billing summary'),
-  Command.withHandler(({ enterprise }) =>
-    Enterprise.pipe(
-      Effect.flatMap((ent) =>
-        emit('enterprise.billing.usage', ent.billing(enterprise), { next_actions: billingNextActions })
-      )
-    )
-  )
+  Command.withHandler(({ enterprise }) => emitBilling('enterprise.billing.usage', enterprise))
 )
 
 // `actions` is an alias for the usage summary (the Ruby `billing` command pulls
 // the unified usage endpoint and the actions section is part of that summary).
 const actionsCommand = Command.make('actions', { enterprise: enterpriseArg }).pipe(
   Command.withDescription('Show enterprise GitHub Actions billing summary'),
-  Command.withHandler(({ enterprise }) =>
-    Enterprise.pipe(
-      Effect.flatMap((ent) =>
-        emit('enterprise.billing.actions', ent.billing(enterprise), { next_actions: billingNextActions })
-      )
-    )
-  )
+  Command.withHandler(({ enterprise }) => emitBilling('enterprise.billing.actions', enterprise))
 )
 
 const packagesCommand = Command.make('packages', { enterprise: enterpriseArg }).pipe(

@@ -2,7 +2,8 @@ import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
-import { enterpriseCommand } from '../../src/cli/enterprise'
+import { billingPayload, enterpriseCommand } from '../../src/cli/enterprise'
+import type { BillingResult } from '../../src/services/enterprise'
 import { runCli } from '../helpers/run-cli'
 
 // Command-level tests: drive the real `Command.runWith` over the network-free
@@ -316,6 +317,48 @@ describe('enterprise command', () => {
         expect(env.result).toMatchObject({ days_left_in_billing_cycle: 20 })
       })
     )
+  })
+
+  describe('billing payload shaping (mode branch)', () => {
+    const summary: BillingResult = {
+      kind: 'summary',
+      enterprise: 'acme',
+      total_cost: 16,
+      actions: {
+        total_minutes: 1500,
+        total_cost: 16,
+        runner_breakdown: {
+          'Actions Linux': { minutes: 1000, cost: 8, percentage: 66.7 },
+          'Actions Windows': { minutes: 500, cost: 8, percentage: 33.3 },
+        },
+      },
+    }
+
+    it('json mode keeps the structured summary', () => {
+      expect(billingPayload('json', summary)).toBe(summary)
+    })
+
+    it('pretty mode flattens into category/metric/value rows', () => {
+      const rows = billingPayload('pretty', summary)
+      expect(rows).toContainEqual({ category: 'Enterprise', metric: 'Total Cost', value: '$16.0' })
+      expect(rows).toContainEqual({
+        category: 'Actions - Actions Linux',
+        metric: 'Minutes (Share)',
+        value: '1000 (66.7%)',
+      })
+    })
+
+    it('json mode keeps the empty marker', () => {
+      const empty: BillingResult = { kind: 'empty', enterprise: 'acme' }
+      expect(billingPayload('json', empty)).toEqual({ kind: 'empty', enterprise: 'acme' })
+    })
+
+    it('pretty mode renders the empty-usage message', () => {
+      const empty: BillingResult = { kind: 'empty', enterprise: 'acme' }
+      expect(billingPayload('pretty', empty)).toEqual({
+        message: 'No billing usage data found for enterprise acme',
+      })
+    })
   })
 
   describe('licenses', () => {
