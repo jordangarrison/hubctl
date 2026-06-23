@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Going forward this changelog is owned by [release-please](https://github.com/googleapis/release-please): entries are generated from Conventional Commits and published via release PRs. The entries below this note are the historical Ruby-era changelog, preserved for reference.
+
+## [Unreleased]
+
+### ⚠ BREAKING CHANGES
+
+- **Complete rewrite in Bun + TypeScript + Effect v4.** `hubctl` has been reimplemented from the ground up. The previous Ruby/Thor implementation has been removed. The TypeScript CLI is at full feature parity (minus the stubbed `server` command).
+- **Agent-first JSON envelope output by default.** Every command now emits a structured JSON envelope (`{ ok, command, result, next_actions, error, fix }`) when piped or non-interactive, with an automatic human-friendly `--pretty` rendering at a TTY. The Ruby `--format table|json|list` flag has been **removed** — the envelope subsumes it (see ADR-000002).
+
+### Added
+
+- **JSON envelope contract** — a single `Schema`-validated output shape for every command, with `next_actions` (HATEOAS follow-up command templates), plain-language `fix` remediation on errors, and the root command emitting the full command tree as JSON for discovery.
+- **Dual-mode output** — automatic mode resolution (`--json` > `--pretty` > `NO_COLOR`/`CI`/non-TTY → json > TTY → pretty); `--no-color` disables color only.
+- **NDJSON streaming** for long operations (e.g. `enterprise audit-log`), with the last line always the standard envelope.
+- **Result truncation** (~50 items, `truncated: true` + `count`) for agent context-window discipline.
+- **Typed error ADT** (`AuthError`, `NotFoundError`, `ForbiddenError`, `RateLimitError`, `ValidationError`) mapped from Octokit statuses into `error.code`/`fix`.
+- **Vitest + `@effect/vitest`** test stack with a network-free `FakeGithub` layer and a compiled-binary e2e smoke suite (see TESTING.md).
+
+### Changed
+
+- **Distribution** — `hubctl` now ships as a Bun-compiled standalone binary (`bun build --compile`, per-target `linux-x64`/`darwin-arm64` artifacts) plus a rewritten Nix flake whose `packages.default` is a Bun wrapper over the app. The Ruby gem packaging (`gemset.nix`, `*.gemspec`, `Gemfile`) has been removed.
+- **Toolchain** — Bun, `tsgo`, oxlint/oxfmt, `@effect/language-service`, ast-grep, and a `bun run validate` gate replace the RSpec/RuboCop/gem toolchain.
+
+### Removed
+
+- The entire Ruby implementation (`lib/`, `spec/`, `Gemfile*`, `gemset.nix`, `*.gemspec`, `Rakefile`, `.rubocop*`).
+- The `--format` output flag and the stubbed `server` command.
+
 ## [0.3.1] - 2025-01-27
 
 ### Changed
