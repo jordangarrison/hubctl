@@ -1,3 +1,4 @@
+import * as Arr from 'effect/Array'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -107,12 +108,26 @@ export interface ReposShape {
     input: CloneInput
   ) => Effect.Effect<CloneResult, GithubError | PlatformError, ChildProcessSpawner.ChildProcessSpawner>
   readonly archive: (repo: string) => Effect.Effect<ArchiveResult, GithubError>
+  readonly topics: (repo: string, mod: TopicsMod) => Effect.Effect<TopicsResult, GithubError>
 }
 
 // Confirmation of an archive (lib/hubctl/repos.rb#archive).
 export interface ArchiveResult {
   readonly full_name: string
   readonly archived: boolean
+}
+
+// Topic modifications (lib/hubctl/repos.rb#topics). All absent ⇒ list current;
+// `set` replaces everything; otherwise `add`/`remove` merge against current.
+export interface TopicsMod {
+  readonly add?: ReadonlyArray<string>
+  readonly remove?: ReadonlyArray<string>
+  readonly set?: ReadonlyArray<string>
+}
+
+export interface TopicsResult {
+  readonly topics: ReadonlyArray<string>
+  readonly modified: boolean
 }
 
 // Raw repo payload fields we read. `description`/`language` are nullable on the
@@ -183,6 +198,24 @@ const RepoArchived = Schema.Struct({
   archived: Schema.Boolean,
 })
 const decodeArchived = Schema.decodeUnknownSync(RepoArchived)
+
+// The dedicated topics endpoint returns/accepts `{ names: string[] }`.
+const Topics = Schema.Struct({ names: Schema.Array(Schema.String) })
+const decodeTopics = Schema.decodeUnknownSync(Topics)
+
+// Whether any modification was requested (vs a plain list).
+const hasMod = (mod: TopicsMod): boolean => mod.set !== undefined || mod.add !== undefined || mod.remove !== undefined
+
+// Compute the new topic set from the current one (mirrors the Ruby merge):
+// `set` wins outright; otherwise concat `add`, subtract `remove`, then dedupe.
+const mergeTopics = (current: ReadonlyArray<string>, mod: TopicsMod): ReadonlyArray<string> => {
+  if (mod.set !== undefined) {
+    return mod.set
+  }
+  const added = [...current, ...(mod.add ?? [])]
+  const removed = mod.remove === undefined ? added : added.filter((topic) => !mod.remove?.includes(topic))
+  return Arr.dedupe(removed)
+}
 
 // Basename of an "owner/name(.git)" repo argument, dropping any trailing `.git`
 // — mirrors the Ruby `File.basename(repo, '.git')` default clone target.
@@ -317,7 +350,29 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
           .request('PATCH /repos/{owner}/{repo}', { ...splitRepo(repo), archived: true })
           .pipe(Effect.map(decodeArchived), Effect.withSpan('Repos.archive'))
 
-      return { list, show, create, clone, archive }
+      const topics: ReposShape['topics'] = (repo, mod) => {
+        const params = splitRepo(repo)
+        const current = github
+          .request('GET /repos/{owner}/{repo}/topics', params)
+          .pipe(Effect.map((raw) => decodeTopics(raw).names))
+
+        if (!hasMod(mod)) {
+          return current.pipe(
+            Effect.map((names) => ({ topics: names, modified: false })),
+            Effect.withSpan('Repos.topics')
+          )
+        }
+
+        return current.pipe(
+          Effect.flatMap((names) =>
+            github.request('PUT /repos/{owner}/{repo}/topics', { ...params, names: mergeTopics(names, mod) })
+          ),
+          Effect.map((raw) => ({ topics: decodeTopics(raw).names, modified: true })),
+          Effect.withSpan('Repos.topics')
+        )
+      }
+
+      return { list, show, create, clone, archive, topics }
     })
   )
 }

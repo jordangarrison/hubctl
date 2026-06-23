@@ -269,4 +269,43 @@ describe('repos command', () => {
       })
     )
   })
+
+  describe('topics', () => {
+    const topicsRoutes = {
+      'GET /repos/{owner}/{repo}/topics': { names: ['cli', 'effect'] },
+      'PUT /repos/{owner}/{repo}/topics': (params: Record<string, unknown>) => ({ names: params.names }),
+    }
+
+    it.effect('lists current topics when no flags are given', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['topics', 'octocat/hello'], { github: { routes: topicsRoutes } })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('repos.topics')
+        expect(env.result).toMatchObject({ topics: ['cli', 'effect'], modified: false })
+      })
+    )
+
+    it.effect('--set replaces topics (comma-split)', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['topics', 'octocat/hello', '--set', 'fresh,list'], {
+          github: { routes: topicsRoutes },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ topics: ['fresh', 'list'], modified: true })
+      })
+    )
+
+    it.effect('--add and --remove merge against current topics', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['topics', 'octocat/hello', '--add', 'new,cli', '--remove', 'effect'], {
+          github: { routes: topicsRoutes },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ topics: ['cli', 'new'], modified: true })
+      })
+    )
+  })
 })

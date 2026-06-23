@@ -38,6 +38,18 @@ const repoPayload = {
   topics: ['cli', 'effect'],
 }
 
+const withTopics = (names: ReadonlyArray<string>) =>
+  Repos.layer.pipe(
+    Layer.provide(
+      FakeGithub.layer({
+        routes: {
+          'GET /repos/{owner}/{repo}/topics': { names },
+          'PUT /repos/{owner}/{repo}/topics': (params: Record<string, unknown>) => ({ names: params.names }),
+        },
+      })
+    )
+  )
+
 describe('Repos service', () => {
   describe('list', () => {
     it.effect('lists the authenticated user repos via GET /user/repos', () =>
@@ -344,6 +356,33 @@ describe('Repos service', () => {
           Repos.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'PATCH /repos/{owner}/{repo}': 404 } })))
         )
       )
+    )
+  })
+
+  describe('topics', () => {
+    it.effect('lists current topics when no modifications are given', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.topics('octocat/hello', {})
+        expect(result).toEqual({ topics: ['cli', 'effect'], modified: false })
+      }).pipe(Effect.provide(withTopics(['cli', 'effect'])))
+    )
+
+    it.effect('set replaces all topics', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.topics('octocat/hello', { set: ['fresh', 'list'] })
+        expect(result).toEqual({ topics: ['fresh', 'list'], modified: true })
+      }).pipe(Effect.provide(withTopics(['cli', 'effect'])))
+    )
+
+    it.effect('add and remove merge against current topics and dedupe', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.topics('octocat/hello', { add: ['new', 'cli'], remove: ['effect'] })
+        expect(result.modified).toBe(true)
+        expect(result.topics).toEqual(['cli', 'new'])
+      }).pipe(Effect.provide(withTopics(['cli', 'effect'])))
     )
   })
 })

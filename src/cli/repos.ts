@@ -6,7 +6,7 @@ import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSp
 
 import { Output } from '../output/service'
 import { Repos } from '../services/repos'
-import type { CloneInput, CreateInput, ListInput } from '../services/repos'
+import type { CloneInput, CreateInput, ListInput, TopicsMod } from '../services/repos'
 import { emit } from './handle'
 
 // Collapse an `Option<string>` flag into the `{ key: value }` fragment a service
@@ -188,10 +188,53 @@ const archiveCommand = Command.make('archive', { repo: repoArg, yes: yesFlag }).
   )
 )
 
+// v4 `Flag` has no repeated/variadic form, so repeated topic values are passed
+// as a single comma-separated flag (e.g. `--add cli,effect`) and split here.
+// Blank segments are dropped so a trailing comma is harmless.
+const splitCsv = (value: O.Option<string>): O.Option<ReadonlyArray<string>> =>
+  value.pipe(
+    O.map((csv) =>
+      csv
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+    )
+  )
+
+const csvFlag = (name: string, description: string) =>
+  Flag.string(name).pipe(Flag.optional, Flag.map(splitCsv), Flag.withDescription(description))
+
+const addFlag = csvFlag('add', 'Topics to add (comma-separated)')
+const removeFlag = csvFlag('remove', 'Topics to remove (comma-separated)')
+const setFlag = csvFlag('set', 'Topics to set, replacing all existing (comma-separated)')
+
+// Collapse an `Option<string[]>` flag into a `{ key: values }` fragment, or `{}`
+// when the flag was absent — so a TopicsMod field stays truly unset.
+const optionalList = (key: string, value: O.Option<ReadonlyArray<string>>): Record<string, ReadonlyArray<string>> =>
+  O.match(value, { onNone: () => ({}), onSome: (v) => ({ [key]: v }) })
+
+const topicsCommand = Command.make('topics', { repo: repoArg, add: addFlag, remove: removeFlag, set: setFlag }).pipe(
+  Command.withDescription('List or modify repository topics'),
+  Command.withHandler(({ add, remove, repo, set }) =>
+    Repos.pipe(
+      Effect.flatMap((repos) => {
+        const mod: TopicsMod = {
+          ...optionalList('add', add),
+          ...optionalList('remove', remove),
+          ...optionalList('set', set),
+        }
+        return emit('repos.topics', repos.topics(repo, mod), {
+          next_actions: ['hubctl repos show <repo>'],
+        })
+      })
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl repos` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface, mirroring
 // the root command tree.
-const subcommands = [listCommand, showCommand, createCommand, cloneCommand, archiveCommand] as const
+const subcommands = [listCommand, showCommand, createCommand, cloneCommand, archiveCommand, topicsCommand] as const
 
 interface GroupEntry {
   readonly name: string
