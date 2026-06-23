@@ -58,6 +58,31 @@ const memberPayload = {
   html_url: 'https://github.com/octocat',
 }
 
+const repoPayload = {
+  name: 'widget',
+  private: false,
+  description: 'A widget',
+  language: 'Ruby',
+  stargazers_count: 12,
+  forks_count: 3,
+  updated_at: '2021-06-01T00:00:00Z',
+}
+
+const teamPayload = {
+  name: 'Core',
+  slug: 'core',
+  description: 'Core team',
+  privacy: 'closed',
+  members_count: 8,
+  repos_count: 4,
+}
+
+const currentUser = {
+  login: 'octocat',
+  name: 'The Octocat',
+  plan: { name: 'pro' },
+}
+
 describe('Orgs service', () => {
   describe('list', () => {
     it.effect('lists the authenticated user orgs via GET /user/orgs', () =>
@@ -215,6 +240,171 @@ describe('Orgs service', () => {
                 routes: {
                   'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
                     params.filter === '2fa_disabled' ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
+
+  describe('repos', () => {
+    it.effect('lists org repos via GET /orgs/{org}/repos and shapes each row', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.repos('acme', { type: 'all', sort: 'updated' })
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          name: 'widget',
+          private: false,
+          description: 'A widget',
+          language: 'Ruby',
+          stars: 12,
+          forks: 3,
+          updated: '2021-06-01T00:00:00Z',
+        })
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /orgs/{org}/repos': [repoPayload] } })))
+        )
+      )
+    )
+
+    it.effect('defaults missing description/language to "-"', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.repos('acme', { type: 'all', sort: 'updated' })
+        expect(result[0]?.description).toBe('-')
+        expect(result[0]?.language).toBe('-')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: { 'GET /orgs/{org}/repos': [{ ...repoPayload, description: null, language: null }] },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('omits the type param when type is "all" but forwards sort', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.repos('acme', { type: 'all', sort: 'pushed' })
+        expect(result[0]?.name).toBe('widget')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/repos': (params: Record<string, unknown>) =>
+                    params.type === undefined && params.sort === 'pushed'
+                      ? [repoPayload]
+                      : [{ ...repoPayload, name: 'WRONG' }],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('forwards type when not "all"', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.repos('acme', { type: 'private', sort: 'updated' })
+        expect(result[0]?.name).toBe('widget')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/repos': (params: Record<string, unknown>) =>
+                    params.type === 'private' ? [repoPayload] : [{ ...repoPayload, name: 'WRONG' }],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
+
+  describe('teams', () => {
+    it.effect('lists org teams via GET /orgs/{org}/teams and shapes each row', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.teams('acme')
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          name: 'Core',
+          slug: 'core',
+          description: 'Core team',
+          privacy: 'closed',
+          members_count: 8,
+          repos_count: 4,
+        })
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /orgs/{org}/teams': [teamPayload] } })))
+        )
+      )
+    )
+
+    it.effect('defaults a missing description to "-"', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.teams('acme')
+        expect(result[0]?.description).toBe('-')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ routes: { 'GET /orgs/{org}/teams': [{ ...teamPayload, description: null }] } })
+            )
+          )
+        )
+      )
+    )
+  })
+
+  describe('info', () => {
+    const infoRoutes = { 'GET /user': currentUser, 'GET /user/orgs': [orgSummary] }
+
+    it.effect('combines GET /user and GET /user/orgs into the info shape', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.info
+        expect(result).toEqual({
+          login: 'octocat',
+          name: 'The Octocat',
+          plan: 'pro',
+          organizations: [{ index: 1, login: 'acme', description: 'Acme Corp' }],
+        })
+      }).pipe(Effect.provide(Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ routes: infoRoutes })))))
+    )
+
+    it.effect('numbers multiple org memberships and defaults a missing description', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.info
+        expect(result.organizations).toEqual([
+          { index: 1, login: 'acme', description: 'Acme Corp' },
+          { index: 2, login: 'beta', description: 'No description' },
+        ])
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /user': currentUser,
+                  'GET /user/orgs': [orgSummary, { ...orgSummary, login: 'beta', description: null }],
                 },
               })
             )

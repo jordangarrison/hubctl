@@ -53,6 +53,31 @@ const memberPayload = {
   html_url: 'https://github.com/octocat',
 }
 
+const repoPayload = {
+  name: 'widget',
+  private: false,
+  description: 'A widget',
+  language: 'Ruby',
+  stargazers_count: 12,
+  forks_count: 3,
+  updated_at: '2021-06-01T00:00:00Z',
+}
+
+const teamPayload = {
+  name: 'Core',
+  slug: 'core',
+  description: 'Core team',
+  privacy: 'closed',
+  members_count: 8,
+  repos_count: 4,
+}
+
+const currentUser = {
+  login: 'octocat',
+  name: 'The Octocat',
+  plan: { name: 'pro' },
+}
+
 const OrgListItem = Schema.Struct({
   login: Schema.String,
   id: Schema.Finite,
@@ -82,6 +107,9 @@ describe('orgs command', () => {
       expect(names).toContain('list')
       expect(names).toContain('show')
       expect(names).toContain('members')
+      expect(names).toContain('repos')
+      expect(names).toContain('teams')
+      expect(names).toContain('info')
       // invite/remove are NOT part of the Ruby `orgs` group (they live in `users`).
       expect(names).not.toContain('invite')
       expect(names).not.toContain('remove')
@@ -176,6 +204,87 @@ describe('orgs command', () => {
 
         expect(env.ok).toBe(true)
         expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+  })
+
+  describe('repos', () => {
+    it.effect('emits an orgs.repos envelope with shaped rows', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['repos', 'acme'], {
+          github: { routes: { 'GET /orgs/{org}/repos': [repoPayload] } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.repos')
+        expect(env.result).toMatchObject([{ name: 'widget', stars: 12, forks: 3 }])
+      })
+    )
+
+    it.effect('--type private forwards the type param', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['repos', 'acme', '--type', 'private'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/repos': (params: Record<string, unknown>) =>
+                params.type === 'private' ? [repoPayload] : [{ ...repoPayload, name: 'WRONG' }],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ name: 'widget' }])
+      })
+    )
+
+    it.effect('default --type all omits the type param and uses sort=updated', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['repos', 'acme'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/repos': (params: Record<string, unknown>) =>
+                params.type === undefined && params.sort === 'updated'
+                  ? [repoPayload]
+                  : [{ ...repoPayload, name: 'WRONG' }],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ name: 'widget' }])
+      })
+    )
+  })
+
+  describe('teams', () => {
+    it.effect('emits an orgs.teams envelope with shaped rows', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['teams', 'acme'], {
+          github: { routes: { 'GET /orgs/{org}/teams': [teamPayload] } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.teams')
+        expect(env.result).toMatchObject([{ name: 'Core', slug: 'core', members_count: 8, repos_count: 4 }])
+      })
+    )
+  })
+
+  describe('info', () => {
+    it.effect('emits an orgs.info envelope combining the user and memberships', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['info'], {
+          github: { routes: { 'GET /user': currentUser, 'GET /user/orgs': [orgSummary] } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.info')
+        expect(env.result).toMatchObject({
+          login: 'octocat',
+          name: 'The Octocat',
+          plan: 'pro',
+          organizations: [{ index: 1, login: 'acme', description: 'Acme Corp' }],
+        })
       })
     )
   })

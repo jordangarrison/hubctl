@@ -5,7 +5,7 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Orgs } from '../services/orgs'
-import type { MembersInput } from '../services/orgs'
+import type { MembersInput, ReposInput } from '../services/orgs'
 import { emit } from './handle'
 
 const orgArg = Argument.string('org').pipe(Argument.withDescription('Organization login'))
@@ -63,9 +63,58 @@ const membersCommand = Command.make('members', { org: orgArg, role: roleFlag, tw
   )
 )
 
+const typeFlag = Flag.choice('type', ['all', 'public', 'private', 'forks', 'sources', 'member']).pipe(
+  Flag.withDefault('all'),
+  Flag.withDescription('Repository type')
+)
+const sortFlag = Flag.choice('sort', ['created', 'updated', 'pushed', 'full_name']).pipe(
+  Flag.withDefault('updated'),
+  Flag.withDescription('Sort repositories')
+)
+
+const reposCommand = Command.make('repos', { org: orgArg, type: typeFlag, sort: sortFlag }).pipe(
+  Command.withDescription('List organization repositories'),
+  Command.withHandler(({ org, sort, type }) =>
+    Orgs.pipe(
+      Effect.flatMap((orgs) => {
+        const input: ReposInput = { type, sort }
+        return emit('orgs.repos', orgs.repos(org, input), {
+          next_actions: ['hubctl orgs show <org>', 'hubctl repos show <repo>'],
+        })
+      })
+    )
+  )
+)
+
+const teamsCommand = Command.make('teams', { org: orgArg }).pipe(
+  Command.withDescription('List organization teams'),
+  Command.withHandler(({ org }) =>
+    Orgs.pipe(
+      Effect.flatMap((orgs) =>
+        emit('orgs.teams', orgs.teams(org), {
+          next_actions: ['hubctl orgs members <org>', 'hubctl orgs show <org>'],
+        })
+      )
+    )
+  )
+)
+
+const infoCommand = Command.make('info').pipe(
+  Command.withDescription("Show the authenticated user's organization memberships"),
+  Command.withHandler(() =>
+    Orgs.pipe(
+      Effect.flatMap((orgs) =>
+        emit('orgs.info', orgs.info, {
+          next_actions: ['hubctl orgs list', 'hubctl orgs show <org>'],
+        })
+      )
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl orgs` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, showCommand, membersCommand] as const
+const subcommands = [listCommand, showCommand, membersCommand, reposCommand, teamsCommand, infoCommand] as const
 
 interface GroupEntry {
   readonly name: string
