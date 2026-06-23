@@ -322,4 +322,65 @@ describe('Enterprise service', () => {
       )
     )
   })
+
+  describe('auditLog', () => {
+    const auditRoute = 'GET /enterprises/{enterprise}/audit-log'
+    const entries = [
+      {
+        timestamp: 1_700_000_000_000,
+        action: 'repo.create',
+        actor: 'alice',
+        user: 'bob',
+        repo: 'acme/widgets',
+        org: 'acme',
+        created_at: 1_700_000_000_000,
+        document_id: 'abc123',
+      },
+    ]
+
+    it.effect('returns shaped paged audit entries', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.auditLog(enterprise, { order: 'desc' })
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          timestamp: 1_700_000_000_000,
+          action: 'repo.create',
+          actor: 'alice',
+          user: 'bob',
+          repo: 'acme/widgets',
+          org: 'acme',
+          created_at: 1_700_000_000_000,
+          document_id: 'abc123',
+        })
+      }).pipe(Effect.provide(withRoutes({ routes: { [auditRoute]: entries } })))
+    )
+
+    it.effect('forwards order/phrase/after/before query params', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.auditLog(enterprise, {
+          order: 'asc',
+          phrase: 'action:repo.create',
+          after: 'tok-after',
+          before: 'tok-before',
+        })
+        expect(result[0]?.action).toBe('repo.create')
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              [auditRoute]: (params: Record<string, unknown>) =>
+                params.order === 'asc' &&
+                params.phrase === 'action:repo.create' &&
+                params.after === 'tok-after' &&
+                params.before === 'tok-before'
+                  ? entries
+                  : [{ ...entries[0], action: 'WRONG' }],
+            },
+          })
+        )
+      )
+    )
+  })
 })

@@ -286,4 +286,55 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('audit-log', () => {
+    const auditRoute = 'GET /enterprises/{enterprise}/audit-log'
+    const entries = [
+      {
+        timestamp: 1_700_000_000_000,
+        action: 'repo.create',
+        actor: 'alice',
+        user: 'bob',
+        repo: 'acme/widgets',
+        org: 'acme',
+        created_at: 1_700_000_000_000,
+        document_id: 'abc123',
+      },
+    ]
+
+    it.effect('emits shaped paged audit entries', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['audit-log', 'acme'], {
+          github: { routes: { [auditRoute]: entries } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.audit-log')
+        expect(env.result).toMatchObject([{ action: 'repo.create', actor: 'alice' }])
+      })
+    )
+
+    it.effect('forwards --order/--phrase/--after/--before', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(
+          enterpriseCommand,
+          ['audit-log', 'acme', '--order', 'asc', '--phrase', 'action:repo.create', '--after', 'a', '--before', 'b'],
+          {
+            github: {
+              routes: {
+                [auditRoute]: (params: Record<string, unknown>) =>
+                  params.order === 'asc' &&
+                  params.phrase === 'action:repo.create' &&
+                  params.after === 'a' &&
+                  params.before === 'b'
+                    ? entries
+                    : [{ ...entries[0], action: 'WRONG' }],
+              },
+            },
+          }
+        )
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ action: 'repo.create' }])
+      })
+    )
+  })
 })

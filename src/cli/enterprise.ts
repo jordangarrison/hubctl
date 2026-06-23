@@ -5,7 +5,7 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Enterprise } from '../services/enterprise'
-import type { CreateOrgInput, MembersInput, OrganizationsInput } from '../services/enterprise'
+import type { AuditLogInput, CreateOrgInput, MembersInput, OrganizationsInput } from '../services/enterprise'
 import { emit } from './handle'
 
 // The `enterprise` command group. Commands stay THIN: parse Flags/Arguments,
@@ -398,9 +398,60 @@ const licensesCommand = Command.make('licenses', { enterprise: enterpriseArg }).
   )
 )
 
+// === audit-log ===
+
+const orderFlag = Flag.choice('order', ['asc', 'desc']).pipe(
+  Flag.withDefault('desc'),
+  Flag.withDescription('Sort order')
+)
+const phraseFlag = Flag.string('phrase').pipe(Flag.optional, Flag.withDescription('Search phrase for audit entries'))
+const afterFlag = Flag.string('after').pipe(Flag.optional, Flag.withDescription('Show entries after this cursor'))
+const beforeFlag = Flag.string('before').pipe(Flag.optional, Flag.withDescription('Show entries before this cursor'))
+const auditPerPageFlag = Flag.integer('per-page').pipe(
+  Flag.optional,
+  Flag.withDescription('Number of entries per page')
+)
+
+// The audit-log handler returns the full paged result for now. Phase 8.1 wraps
+// the same `Enterprise.auditLog` seam in NDJSON streaming (one entry per line +
+// a terminal envelope); the command stays the integration point.
+const auditLogCommand = Command.make('audit-log', {
+  enterprise: enterpriseArg,
+  order: orderFlag,
+  phrase: phraseFlag,
+  after: afterFlag,
+  before: beforeFlag,
+  perPage: auditPerPageFlag,
+}).pipe(
+  Command.withDescription('Show enterprise audit log'),
+  Command.withHandler(({ after, before, enterprise, order, perPage, phrase }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) => {
+        const input: AuditLogInput = {
+          order,
+          ...optionalField('phrase', phrase),
+          ...optionalField('after', after),
+          ...optionalField('before', before),
+          ...optionalNumber('perPage', perPage),
+        }
+        return emit('enterprise.audit-log', ent.auditLog(enterprise, input), {
+          next_actions: ['hubctl enterprise stats <enterprise>'],
+        })
+      })
+    )
+  )
+)
+
 // === group discovery ===
 
-const subcommands = [orgsCommand, membersCommand, ownersCommand, billingCommand, licensesCommand] as const
+const subcommands = [
+  orgsCommand,
+  membersCommand,
+  ownersCommand,
+  billingCommand,
+  licensesCommand,
+  auditLogCommand,
+] as const
 
 export const enterpriseCommand = (): Command.Command<
   'enterprise',

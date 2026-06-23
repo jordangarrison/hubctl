@@ -172,8 +172,49 @@ export interface RemoveOwnerResult {
   readonly removed: boolean
 }
 
+// === Audit log ===
+
+// Shaped audit-log entry (lib/hubctl/enterprise.rb#audit_log `audit_data`).
+// `timestamp`/`created_at` are epoch-ms numbers on the wire; the other fields
+// are optional strings.
+export interface AuditLogEntry {
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly timestamp: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly action: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly actor: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly user: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly repo: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly org: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly created_at: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly document_id: string | null
+}
+
+export type AuditOrder = 'asc' | 'desc'
+
+export interface AuditLogInput {
+  readonly order?: AuditOrder
+  readonly phrase?: string
+  readonly after?: string
+  readonly before?: string
+  readonly perPage?: number
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  // Paginated audit log (lib/hubctl/enterprise.rb#audit_log). Returns the full
+  // paged result for now; Phase 8.1 wires the same data into NDJSON streaming —
+  // `auditLog` is the clean seam that streaming will consume.
+  readonly auditLog: (
+    enterprise: string,
+    input: AuditLogInput
+  ) => Effect.Effect<ReadonlyArray<AuditLogEntry>, GithubError>
   // Raw packages/shared-storage billing payloads (lib/hubctl/github_client.rb
   // #enterprise_packages_billing / #enterprise_shared_storage_billing). The Ruby
   // emits these verbatim, so the port surfaces the decoded object as-is.
@@ -379,6 +420,45 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
 const RawObject = Schema.Record(Schema.String, Schema.Unknown)
 const decodeRawObject = Schema.decodeUnknownSync(RawObject)
 
+// === Audit-log helpers ===
+
+// Raw audit-log entry fields read by `auditLog`. All optional/nullable on the
+// wire; the transform fills absent fields with null (mirroring the Ruby
+// hash-access defaults).
+const AuditEntryRaw = Schema.Struct({
+  timestamp: Schema.optional(Schema.NullOr(Schema.Finite)),
+  action: Schema.optional(Schema.NullOr(Schema.String)),
+  actor: Schema.optional(Schema.NullOr(Schema.String)),
+  user: Schema.optional(Schema.NullOr(Schema.String)),
+  repo: Schema.optional(Schema.NullOr(Schema.String)),
+  org: Schema.optional(Schema.NullOr(Schema.String)),
+  created_at: Schema.optional(Schema.NullOr(Schema.Finite)),
+  document_id: Schema.optional(Schema.NullOr(Schema.String)),
+})
+const decodeAuditEntries = Schema.decodeUnknownSync(Schema.Array(AuditEntryRaw))
+
+const toAuditEntry = (entry: typeof AuditEntryRaw.Type): AuditLogEntry => ({
+  timestamp: entry.timestamp ?? null,
+  action: entry.action ?? null,
+  actor: entry.actor ?? null,
+  user: entry.user ?? null,
+  repo: entry.repo ?? null,
+  org: entry.org ?? null,
+  created_at: entry.created_at ?? null,
+  document_id: entry.document_id ?? null,
+})
+
+// Build the audit-log query params (lib/hubctl/enterprise.rb#audit_log
+// `audit_options`): always send `order`; include phrase/after/before/per_page
+// only when supplied.
+const auditParams = (input: AuditLogInput): Record<string, unknown> => ({
+  order: input.order ?? 'desc',
+  ...(input.phrase === undefined ? {} : { phrase: input.phrase }),
+  ...(input.after === undefined ? {} : { after: input.after }),
+  ...(input.before === undefined ? {} : { before: input.before }),
+  ...(input.perPage === undefined ? {} : { per_page: input.perPage }),
+})
+
 // === Members & owners helpers ===
 
 // Raw consumed-license user record (lib/hubctl/github_client.rb consumed-licenses
@@ -521,6 +601,13 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .request('GET /enterprises/{enterprise}/billing/shared-storage', { enterprise })
           .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.sharedStorageBilling'))
 
+      const auditLog: EnterpriseShape['auditLog'] = (enterprise, input) =>
+        github.paginate('GET /enterprises/{enterprise}/audit-log', { enterprise, ...auditParams(input) }).pipe(
+          Effect.map(decodeAuditEntries),
+          Effect.map((entries) => entries.map(toAuditEntry)),
+          Effect.withSpan('Enterprise.auditLog')
+        )
+
       const consumedLicenses: EnterpriseShape['consumedLicenses'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/consumed-licenses', { enterprise })
@@ -584,6 +671,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         packagesBilling,
         sharedStorageBilling,
         consumedLicenses,
+        auditLog,
         members,
         owners,
         addOwner,
