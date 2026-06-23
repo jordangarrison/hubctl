@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import { Argument, Flag } from 'effect/unstable/cli'
+import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSpawner'
 
@@ -138,10 +138,60 @@ const cloneCommand = Command.make('clone', { repo: repoArg, path: pathFlag, dept
   )
 )
 
+const yesFlag = Flag.boolean('yes').pipe(Flag.withDefault(false), Flag.withDescription('Skip the confirmation prompt'))
+
+const archiveNextActions = ['hubctl repos list', 'hubctl repos show <repo>']
+
+// Resolve whether the archive may proceed. `--yes` short-circuits to true. In
+// json mode (agents/pipes) we NEVER prompt, so without `--yes` the answer is
+// false (the handler then fails with a re-run `fix`). In pretty/TTY mode we ask
+// interactively via `Prompt.confirm`, treating a quit as a decline.
+const confirmArchive = (
+  repo: string,
+  yes: boolean,
+  output: typeof Output.Service
+): Effect.Effect<boolean, never, Prompt.Environment> => {
+  if (yes) {
+    return Effect.succeed(true)
+  }
+  if (output.mode === 'json') {
+    return Effect.succeed(false)
+  }
+  return Prompt.run(Prompt.confirm({ message: `Archive ${repo}? This cannot be undone easily.` })).pipe(
+    Effect.orElseSucceed(() => false)
+  )
+}
+
+const archiveCommand = Command.make('archive', { repo: repoArg, yes: yesFlag }).pipe(
+  Command.withDescription('Archive a repository'),
+  Command.withHandler(({ repo, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const repos = yield* Repos
+      const confirmed = yield* confirmArchive(repo, yes, output)
+
+      if (confirmed) {
+        yield* emit('repos.archive', repos.archive(repo), { next_actions: archiveNextActions })
+        return
+      }
+
+      // Declined: in json mode surface an actionable `fix`; in pretty mode the
+      // user chose "no", so report a cancelled (non-destructive) result.
+      yield* output.mode === 'json'
+        ? output.fail('repos.archive', {
+            code: 'confirmation_required',
+            message: `Archiving ${repo} is destructive and was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('repos.archive', { full_name: repo, archived: false, cancelled: true })
+    })
+  )
+)
+
 // Subcommand discovery for `hubctl repos` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface, mirroring
 // the root command tree.
-const subcommands = [listCommand, showCommand, createCommand, cloneCommand] as const
+const subcommands = [listCommand, showCommand, createCommand, cloneCommand, archiveCommand] as const
 
 interface GroupEntry {
   readonly name: string

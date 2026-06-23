@@ -106,6 +106,13 @@ export interface ReposShape {
     repo: string,
     input: CloneInput
   ) => Effect.Effect<CloneResult, GithubError | PlatformError, ChildProcessSpawner.ChildProcessSpawner>
+  readonly archive: (repo: string) => Effect.Effect<ArchiveResult, GithubError>
+}
+
+// Confirmation of an archive (lib/hubctl/repos.rb#archive).
+export interface ArchiveResult {
+  readonly full_name: string
+  readonly archived: boolean
 }
 
 // Raw repo payload fields we read. `description`/`language` are nullable on the
@@ -168,6 +175,14 @@ const decodeCreated = Schema.decodeUnknownSync(RepoCreated)
 // Just the `clone_url` the `clone` flow needs from the repo payload.
 const RepoCloneUrl = Schema.Struct({ clone_url: Schema.String })
 const decodeCloneUrl = Schema.decodeUnknownSync(RepoCloneUrl)
+
+// Archive confirmation fields read back from the PATCH response.
+const RepoArchived = Schema.Struct({
+  full_name: Schema.String,
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  archived: Schema.Boolean,
+})
+const decodeArchived = Schema.decodeUnknownSync(RepoArchived)
 
 // Basename of an "owner/name(.git)" repo argument, dropping any trailing `.git`
 // — mirrors the Ruby `File.basename(repo, '.git')` default clone target.
@@ -297,7 +312,12 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
           Effect.withSpan('Repos.clone')
         )
 
-      return { list, show, create, clone }
+      const archive: ReposShape['archive'] = (repo) =>
+        github
+          .request('PATCH /repos/{owner}/{repo}', { ...splitRepo(repo), archived: true })
+          .pipe(Effect.map(decodeArchived), Effect.withSpan('Repos.archive'))
+
+      return { list, show, create, clone, archive }
     })
   )
 }

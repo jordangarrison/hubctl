@@ -238,4 +238,35 @@ describe('repos command', () => {
       })
     )
   })
+
+  describe('archive', () => {
+    const archived = { full_name: 'octocat/hello', archived: true }
+
+    it.effect('in json mode without --yes fails with a re-run fix and does NOT call the API', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['archive', 'octocat/hello'], {
+          // No PATCH route registered: if the handler hit the API it would die on
+          // the missing fixture, so reaching an ok:false envelope proves it gated.
+          github: {},
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('repos.archive')
+        expect(env.result).toBeNull()
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('in json mode with --yes archives the repo', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['archive', 'octocat/hello', '--yes'], {
+          github: { routes: { 'PATCH /repos/{owner}/{repo}': archived } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('repos.archive')
+        expect(env.result).toMatchObject({ full_name: 'octocat/hello', archived: true })
+      })
+    )
+  })
 })

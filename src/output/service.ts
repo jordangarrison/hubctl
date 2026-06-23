@@ -28,6 +28,10 @@ export interface OutputOptions {
 }
 
 export interface OutputShape {
+  // The resolved output mode. Commands consult it to decide whether they may
+  // prompt interactively (pretty/TTY) or must gate destructive ops behind
+  // `--yes` (json) — see `repos archive`.
+  readonly mode: Mode
   readonly ok: <A>(command: string, result: A, opts?: OkOptions) => Effect.Effect<void>
   readonly fail: (command: string, error: FailableError) => Effect.Effect<void>
   // Phase 8 will add a `stream` sink for incremental output; not implemented here.
@@ -47,6 +51,7 @@ export class Output extends Context.Service<Output, OutputShape>()('Output') {
     const noColor = options.noColor ?? false
     const renderOptions = { noColor }
     return Layer.succeed(Output, {
+      mode: options.mode,
       ok: (command, result, opts) =>
         Console.log(render(options.mode, makeOk(command, result, opts?.next_actions ?? []), renderOptions)),
       fail: (command, error) =>

@@ -308,4 +308,42 @@ describe('Repos service', () => {
       }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
     )
   })
+
+  describe('archive', () => {
+    it.effect('PATCHes the repo with archived=true and returns the result', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.archive('octocat/hello')
+        expect(result).toEqual({ full_name: 'octocat/hello', archived: true })
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'PATCH /repos/{owner}/{repo}': (params: Record<string, unknown>) =>
+                    params.owner === 'octocat' && params.repo === 'hello' && params.archived === true
+                      ? { full_name: 'octocat/hello', archived: true }
+                      : { full_name: 'WRONG', archived: false },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const exit = yield* Effect.exit(repos.archive('octocat/missing'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'PATCH /repos/{owner}/{repo}': 404 } })))
+        )
+      )
+    )
+  })
 })
