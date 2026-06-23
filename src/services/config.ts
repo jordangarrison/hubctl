@@ -31,6 +31,8 @@ export interface ConfigShape {
   readonly set: (key: string, value: string) => Effect.Effect<void, PlatformError>
   // Read the whole config file as a record.
   readonly list: Effect.Effect<Record<string, unknown>, PlatformError>
+  // Absolute path to the on-disk config file (~/.config/hubctl/config.json).
+  readonly configPath: string
 }
 
 const parseJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
@@ -107,7 +109,7 @@ export class Config extends Context.Service<Config, ConfigShape>()('Config') {
         ? Effect.succeed(orgEnv)
         : get('default_org').pipe(Effect.orElseSucceed(() => O.none<string>()))
 
-      return { githubToken, defaultOrg, get, set, list }
+      return { githubToken, defaultOrg, get, set, list, configPath }
     })
   )
 }

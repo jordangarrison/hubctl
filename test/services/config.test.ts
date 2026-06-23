@@ -131,4 +131,11 @@ describe('Config service', () => {
       expect(yield* config.list).toEqual({})
     }).pipe(Effect.provide(testLayer({ HOME })))
   )
+
+  it.effect('configPath reports the resolved ~/.config/hubctl/config.json path', () =>
+    Effect.gen(function* () {
+      const config = yield* Config
+      expect(config.configPath).toBe(CONFIG_PATH)
+    }).pipe(Effect.provide(testLayer({ HOME })))
+  )
 })
