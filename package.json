@@ -19,7 +19,7 @@
     "ast-grep": "ast-grep scan",
     "ast-grep:test": "ast-grep test",
     "fallow": "fallow audit --quiet",
-    "build:local": "bun build --compile --outfile dist/hubctl src/main.ts",
+    "build:local": "bun run scripts/compile.ts",
     "validate": "bun run format && bun run lint && bun run typecheck && bun run test && bun run ast-grep",
     "postinstall": "effect-language-service patch && effect-tsgo patch",
     "prepare": "simple-git-hooks || true"
