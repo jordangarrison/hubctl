@@ -11,6 +11,9 @@ import type { GithubError } from '../github/errors'
 // the Ruby tool's output fields. Each method maps a GitHub REST route through
 // `Github.request`/`paginate` and reshapes the raw payload.
 
+export type TeamPrivacy = 'secret' | 'closed'
+export type TeamPermission = 'pull' | 'triage' | 'push' | 'maintain' | 'admin'
+
 // Row shape for `teams list` (lib/hubctl/teams.rb#list `team_data`).
 export interface TeamListItem {
   readonly id: number
@@ -23,8 +26,25 @@ export interface TeamListItem {
   readonly repos_count: number
 }
 
+export interface CreateInput {
+  readonly description?: string
+  readonly privacy: TeamPrivacy
+  readonly permission: TeamPermission
+}
+
+// Summary returned after creating a team (lib/hubctl/teams.rb#create surfaces
+// `id`/`name`/`slug`/`privacy`/`permission`).
+export interface CreatedTeam {
+  readonly id: number
+  readonly name: string
+  readonly slug: string
+  readonly privacy: string
+  readonly permission: string
+}
+
 export interface TeamsShape {
   readonly list: (org: string) => Effect.Effect<ReadonlyArray<TeamListItem>, GithubError>
+  readonly create: (org: string, name: string, input: CreateInput) => Effect.Effect<CreatedTeam, GithubError>
 }
 
 // Raw team payload fields read by `list`. `description` is nullable on the wire;
@@ -52,6 +72,26 @@ const toListItem = (team: typeof TeamSummary.Type): TeamListItem => ({
   repos_count: team.repos_count,
 })
 
+// Created-team summary fields (lib/hubctl/teams.rb#create).
+const TeamCreated = Schema.Struct({
+  id: Schema.Finite,
+  name: Schema.String,
+  slug: Schema.String,
+  privacy: Schema.String,
+  permission: Schema.String,
+})
+const decodeCreated = Schema.decodeUnknownSync(TeamCreated)
+
+// Build the create-team request body, mirroring the Ruby `team_options`
+// assembly: always send `name`/`privacy`/`permission`, and only include the
+// description when the caller supplied one.
+const createBody = (name: string, input: CreateInput): Record<string, unknown> => ({
+  name,
+  privacy: input.privacy,
+  permission: input.permission,
+  ...(input.description === undefined ? {} : { description: input.description }),
+})
+
 export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
   static readonly layer: Layer.Layer<Teams, never, Github> = Layer.effect(
     Teams,
@@ -65,7 +105,12 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
           Effect.withSpan('Teams.list')
         )
 
-      return { list }
+      const create: TeamsShape['create'] = (org, name, input) =>
+        github
+          .request('POST /orgs/{org}/teams', { org, ...createBody(name, input) })
+          .pipe(Effect.map(decodeCreated), Effect.withSpan('Teams.create'))
+
+      return { list, create }
     })
   )
 }

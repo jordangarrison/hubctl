@@ -76,4 +76,51 @@ describe('Teams service', () => {
       )
     )
   })
+
+  describe('create', () => {
+    const created = { id: 99, name: 'Squad', slug: 'squad', privacy: 'closed', permission: 'pull' }
+
+    it.effect('creates a team via POST /orgs/{org}/teams and returns the summary', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.create('acme', 'Squad', { privacy: 'closed', permission: 'pull' })
+        expect(result).toEqual({ id: 99, name: 'Squad', slug: 'squad', privacy: 'closed', permission: 'pull' })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'POST /orgs/{org}/teams': created } })))
+        )
+      )
+    )
+
+    it.effect('forwards name, privacy and permission and an optional description', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.create('acme', 'Squad', {
+          privacy: 'secret',
+          permission: 'admin',
+          description: 'a squad',
+        })
+        expect(result.slug).toBe('squad')
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'POST /orgs/{org}/teams': (params: Record<string, unknown>) =>
+                    params.org === 'acme' &&
+                    params.name === 'Squad' &&
+                    params.privacy === 'secret' &&
+                    params.permission === 'admin' &&
+                    params.description === 'a squad'
+                      ? created
+                      : { ...created, slug: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
 })

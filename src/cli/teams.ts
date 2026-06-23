@@ -1,10 +1,11 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import { Flag } from 'effect/unstable/cli'
+import { Argument, Flag } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Teams } from '../services/teams'
+import type { CreateInput } from '../services/teams'
 import { emit } from './handle'
 
 // The `teams` command group. Commands stay THIN: parse Flags/Arguments, call the
@@ -28,9 +29,45 @@ const listCommand = Command.make('list', { org: orgFlag }).pipe(
   )
 )
 
+const nameArg = Argument.string('name').pipe(Argument.withDescription('Team name'))
+
+const descriptionFlag = Flag.string('description').pipe(Flag.optional, Flag.withDescription('Team description'))
+const privacyFlag = Flag.choice('privacy', ['secret', 'closed']).pipe(
+  Flag.withDefault('closed'),
+  Flag.withDescription('Team privacy')
+)
+const permissionFlag = Flag.choice('permission', ['pull', 'triage', 'push', 'maintain', 'admin']).pipe(
+  Flag.withDefault('pull'),
+  Flag.withDescription('Permission level')
+)
+
+const createCommand = Command.make('create', {
+  name: nameArg,
+  org: orgFlag,
+  description: descriptionFlag,
+  privacy: privacyFlag,
+  permission: permissionFlag,
+}).pipe(
+  Command.withDescription('Create a new team'),
+  Command.withHandler(({ description, name, org, permission, privacy }) =>
+    Teams.pipe(
+      Effect.flatMap((teams) => {
+        const input: CreateInput = {
+          ...O.match(description, { onNone: () => ({}), onSome: (v) => ({ description: v }) }),
+          privacy,
+          permission,
+        }
+        return emit('teams.create', teams.create(org, name, input), {
+          next_actions: ['hubctl teams members <team> --org <org>', 'hubctl teams add <team> <user> --org <org>'],
+        })
+      })
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl teams` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand] as const
+const subcommands = [listCommand, createCommand] as const
 
 interface GroupEntry {
   readonly name: string

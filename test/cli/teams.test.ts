@@ -46,6 +46,7 @@ describe('teams command', () => {
       const tree = decodeGroup(env.result)
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('list')
+      expect(names).toContain('create')
     })
   )
 
@@ -80,6 +81,41 @@ describe('teams command', () => {
         expect(env.result).toBeNull()
         expect(env.error?.code).toBe('NotFoundError')
         expect(env.fix).not.toBeNull()
+      })
+    )
+  })
+
+  describe('create', () => {
+    const created = { id: 99, name: 'Squad', slug: 'squad', privacy: 'closed', permission: 'pull' }
+
+    it.effect('emits a teams.create envelope with the created summary', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['create', 'Squad', '--org', 'acme'], {
+          github: { routes: { 'POST /orgs/{org}/teams': created } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.create')
+        expect(env.result).toMatchObject({ id: 99, slug: 'squad' })
+        expect(env.next_actions).toContain('hubctl teams members <team> --org <org>')
+      })
+    )
+
+    it.effect('defaults privacy=closed and permission=pull and forwards them', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['create', 'Squad', '--org', 'acme'], {
+          github: {
+            routes: {
+              'POST /orgs/{org}/teams': (params: Record<string, unknown>) =>
+                params.name === 'Squad' && params.privacy === 'closed' && params.permission === 'pull'
+                  ? created
+                  : { ...created, slug: 'WRONG' },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ slug: 'squad' })
       })
     )
   })
