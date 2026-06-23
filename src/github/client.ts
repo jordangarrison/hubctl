@@ -2,10 +2,13 @@ import { Octokit } from '@octokit/core'
 import { paginateRest } from '@octokit/plugin-paginate-rest'
 import { retry } from '@octokit/plugin-retry'
 import { throttling } from '@octokit/plugin-throttling'
+import * as Config_ from 'effect/Config'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as O from 'effect/Option'
 
+import { Config } from '../services/config'
 import type { GithubError } from './errors'
 import { toGithubError } from './errors'
 
@@ -84,3 +87,44 @@ export class Github extends Context.Service<Github, GithubShape>()('Github') {
 // tests, a plugged Octokit in production via `Github.layer`).
 export const makeGithub = (octokit: OctokitLike): Layer.Layer<Github> =>
   Layer.succeed(Github, shapeFromOctokit(octokit))
+
+// Optional GHES/base-URL override (e.g. `HUBCTL_GITHUB_BASE_URL` for an
+// Enterprise Server instance or the e2e mock server). Read once at layer
+// construction; absence falls back to Octokit's default github.com.
+const baseUrlConfig = Effect.orElseSucceed(Config_.option(Config_.string('HUBCTL_GITHUB_BASE_URL')), () =>
+  O.none<string>()
+)
+
+// Production `Github` layer that sources its token from the `Config` service —
+// the design's `effect: const token = yield* Config.githubToken` wiring, but
+// with token resolution DEFERRED to the first request rather than performed at
+// layer construction. Building Octokit lazily (memoized via `Effect.cached`)
+// keeps the layer total: it never fails up front, so token-free commands
+// (`version`, the root command tree) still run, and a missing/invalid token
+// surfaces as a typed `AuthError` from the request itself — exactly where the
+// top-level handler can turn it into an `ok:false` envelope.
+export const githubFromConfig: Layer.Layer<Github, never, Config> = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* Config
+    const baseUrl = yield* baseUrlConfig
+
+    // Resolve the token + build the plugged Octokit at most once, on first use.
+    const octokitOnce = yield* Effect.cached(
+      config.githubToken.pipe(
+        Effect.map((token) => buildOctokit({ token, ...(O.isSome(baseUrl) ? { baseUrl: baseUrl.value } : {}) }))
+      )
+    )
+
+    // Each surface first resolves (the memoized) Octokit, then delegates to the
+    // shared `shapeFromOctokit` mapping so token-resolution `AuthError`s and
+    // Octokit rejections both land in the typed `E` channel.
+    const shape: GithubShape = {
+      request: (route, params) =>
+        octokitOnce.pipe(Effect.flatMap((octokit) => shapeFromOctokit(octokit).request(route, params))),
+      paginate: (route, params) =>
+        octokitOnce.pipe(Effect.flatMap((octokit) => shapeFromOctokit(octokit).paginate(route, params))),
+    }
+
+    return Layer.succeed(Github, shape)
+  })
+)

@@ -75,7 +75,7 @@
         },
         "overrides": [
           {
-            "include": ["**/test/**/*.ts", "**/*.test.ts"],
+            "include": ["**/test/**/*.ts", "**/*.test.ts", "**/src/main.ts"],
             "options": {
               "diagnosticSeverity": { "strictEffectProvide": "off" }
             }
