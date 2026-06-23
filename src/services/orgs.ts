@@ -90,11 +90,19 @@ export interface InviteResult {
   readonly invited: string
 }
 
+// Outcome of removing a member.
+export interface RemoveResult {
+  readonly org: string
+  readonly user: string
+  readonly removed: boolean
+}
+
 export interface OrgsShape {
   readonly list: Effect.Effect<ReadonlyArray<OrgListItem>, GithubError>
   readonly show: (org: string) => Effect.Effect<OrgDetail, GithubError>
   readonly members: (org: string, input: MembersInput) => Effect.Effect<ReadonlyArray<OrgMember>, GithubError>
   readonly invite: (org: string, target: string, input: InviteInput) => Effect.Effect<InviteResult, GithubError>
+  readonly remove: (org: string, user: string) => Effect.Effect<RemoveResult, GithubError>
 }
 
 // Raw org summary fields read by `list`. `description` is nullable on the wire;
@@ -263,7 +271,12 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
         )
       }
 
-      return { list, show, members, invite }
+      const remove: OrgsShape['remove'] = (org, user) =>
+        github
+          .request('DELETE /orgs/{org}/members/{username}', { org, username: user })
+          .pipe(Effect.as({ org, user, removed: true }), Effect.withSpan('Orgs.remove'))
+
+      return { list, show, members, invite, remove }
     })
   )
 }

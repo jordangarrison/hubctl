@@ -295,4 +295,40 @@ describe('Orgs service', () => {
       )
     )
   })
+
+  describe('remove', () => {
+    it.effect('DELETEs the member via DELETE /orgs/{org}/members/{username}', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.remove('acme', 'octocat')
+        expect(result).toEqual({ org: 'acme', user: 'octocat', removed: true })
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'DELETE /orgs/{org}/members/{username}': (params: Record<string, unknown>) =>
+                    params.org === 'acme' && params.username === 'octocat' ? {} : undefined,
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const exit = yield* Effect.exit(orgs.remove('acme', 'ghost'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'DELETE /orgs/{org}/members/{username}': 404 } })))
+        )
+      )
+    )
+  })
 })
