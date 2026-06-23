@@ -106,4 +106,73 @@ describe('Repos service', () => {
       )
     )
   })
+
+  describe('show', () => {
+    const showLayer = Repos.layer.pipe(
+      Layer.provide(FakeGithub.layer({ routes: { 'GET /repos/{owner}/{repo}': repoPayload } }))
+    )
+
+    it.effect('returns the full repository detail shape', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const detail = yield* repos.show('octocat/hello')
+        expect(detail).toEqual({
+          name: 'hello',
+          full_name: 'octocat/hello',
+          description: 'A test repo',
+          private: false,
+          fork: false,
+          language: 'TypeScript',
+          size: '128 KB',
+          stars: 42,
+          watchers: 7,
+          forks: 3,
+          open_issues: 1,
+          default_branch: 'main',
+          created_at: '2020-01-01T00:00:00Z',
+          updated_at: '2021-01-01T00:00:00Z',
+          pushed_at: '2021-02-01T00:00:00Z',
+          clone_url: 'https://github.com/octocat/hello.git',
+          ssh_url: 'git@github.com:octocat/hello.git',
+          html_url: 'https://github.com/octocat/hello',
+        })
+      }).pipe(Effect.provide(showLayer))
+    )
+
+    it.effect('passes owner/repo split to the route params', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const detail = yield* repos.show('octocat/hello')
+        expect(detail.name).toBe('hello')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /repos/{owner}/{repo}': (params: Record<string, unknown>) =>
+                    params.owner === 'octocat' && params.repo === 'hello'
+                      ? repoPayload
+                      : { ...repoPayload, name: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const exit = yield* Effect.exit(repos.show('octocat/missing'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /repos/{owner}/{repo}': 404 } })))
+        )
+      )
+    )
+  })
 })

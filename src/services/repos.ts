@@ -35,8 +35,33 @@ export interface RepoListItem {
   readonly updated: string
 }
 
+// Full detail shape for `repos show` (lib/hubctl/repos.rb#show `repo_details`).
+export interface RepoDetail {
+  readonly name: string
+  readonly full_name: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly description: string | null
+  readonly private: boolean
+  readonly fork: boolean
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly language: string | null
+  readonly size: string
+  readonly stars: number
+  readonly watchers: number
+  readonly forks: number
+  readonly open_issues: number
+  readonly default_branch: string
+  readonly created_at: string
+  readonly updated_at: string
+  readonly pushed_at: string
+  readonly clone_url: string
+  readonly ssh_url: string
+  readonly html_url: string
+}
+
 export interface ReposShape {
   readonly list: (input: ListInput) => Effect.Effect<ReadonlyArray<RepoListItem>, GithubError>
+  readonly show: (repo: string) => Effect.Effect<RepoDetail, GithubError>
 }
 
 // Raw repo payload fields we read. `description`/`language` are nullable on the
@@ -55,6 +80,63 @@ const RepoSummary = Schema.Struct({
 })
 
 const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(RepoSummary))
+
+// Full repo payload for `show`. `description`/`language` stay nullable on the
+// wire (the detail view shows them verbatim, unlike the list's '-' default).
+const RepoFull = Schema.Struct({
+  name: Schema.String,
+  full_name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  // `private`/`fork` are GitHub's wire field names; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  private: Schema.Boolean,
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  fork: Schema.Boolean,
+  language: Schema.NullOr(Schema.String),
+  size: Schema.Finite,
+  stargazers_count: Schema.Finite,
+  watchers_count: Schema.Finite,
+  forks_count: Schema.Finite,
+  open_issues_count: Schema.Finite,
+  default_branch: Schema.String,
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  pushed_at: Schema.String,
+  clone_url: Schema.String,
+  ssh_url: Schema.String,
+  html_url: Schema.String,
+})
+
+const decodeFull = Schema.decodeUnknownSync(RepoFull)
+
+const toDetail = (repo: typeof RepoFull.Type): RepoDetail => ({
+  name: repo.name,
+  full_name: repo.full_name,
+  description: repo.description,
+  private: repo.private,
+  fork: repo.fork,
+  language: repo.language,
+  size: `${repo.size} KB`,
+  stars: repo.stargazers_count,
+  watchers: repo.watchers_count,
+  forks: repo.forks_count,
+  open_issues: repo.open_issues_count,
+  default_branch: repo.default_branch,
+  created_at: repo.created_at,
+  updated_at: repo.updated_at,
+  pushed_at: repo.pushed_at,
+  clone_url: repo.clone_url,
+  ssh_url: repo.ssh_url,
+  html_url: repo.html_url,
+})
+
+// Split an "owner/name" repo argument into the `{ owner, repo }` route params
+// GitHub's REST endpoints expect. A bare name (no slash) leaves `owner` empty —
+// the request then 404s, surfacing the same NotFoundError the Ruby tool reports.
+const splitRepo = (repo: string): { owner: string; repo: string } => {
+  const slash = repo.indexOf('/')
+  return slash === -1 ? { owner: '', repo } : { owner: repo.slice(0, slash), repo: repo.slice(slash + 1) }
+}
 
 const toListItem = (repo: typeof RepoSummary.Type): RepoListItem => ({
   name: repo.name,
@@ -93,7 +175,12 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
         )
       }
 
-      return { list }
+      const show: ReposShape['show'] = (repo) =>
+        github
+          .request('GET /repos/{owner}/{repo}', splitRepo(repo))
+          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Repos.show'))
+
+      return { list, show }
     })
   )
 }

@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import { Flag } from 'effect/unstable/cli'
+import { Argument, Flag } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
@@ -53,10 +53,25 @@ const listCommand = Command.make('list', {
   )
 )
 
+const repoArg = Argument.string('repo').pipe(Argument.withDescription('Repository (owner/name)'))
+
+const showCommand = Command.make('show', { repo: repoArg }).pipe(
+  Command.withDescription('Show repository details'),
+  Command.withHandler(({ repo }) =>
+    Repos.pipe(
+      Effect.flatMap((repos) =>
+        emit('repos.show', repos.show(repo), {
+          next_actions: ['hubctl repos clone <repo>', 'hubctl repos topics <repo>'],
+        })
+      )
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl repos` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface, mirroring
 // the root command tree.
-const subcommands = [listCommand] as const
+const subcommands = [listCommand, showCommand] as const
 
 interface GroupEntry {
   readonly name: string

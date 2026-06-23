@@ -96,4 +96,53 @@ describe('repos command', () => {
       })
     )
   })
+
+  describe('show', () => {
+    const fullPayload = {
+      name: 'hello',
+      full_name: 'octocat/hello',
+      description: 'A test repo',
+      private: false,
+      fork: false,
+      language: 'TypeScript',
+      size: 128,
+      stargazers_count: 42,
+      watchers_count: 7,
+      forks_count: 3,
+      open_issues_count: 1,
+      default_branch: 'main',
+      created_at: '2020-01-01T00:00:00Z',
+      updated_at: '2021-01-01T00:00:00Z',
+      pushed_at: '2021-02-01T00:00:00Z',
+      clone_url: 'https://github.com/octocat/hello.git',
+      ssh_url: 'git@github.com:octocat/hello.git',
+      html_url: 'https://github.com/octocat/hello',
+    }
+
+    it.effect('emits a repos.show envelope with the detail shape and next_actions', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['show', 'octocat/hello'], {
+          github: { routes: { 'GET /repos/{owner}/{repo}': fullPayload } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('repos.show')
+        expect(env.result).toMatchObject({ name: 'hello', full_name: 'octocat/hello', size: '128 KB' })
+        expect(env.next_actions).toContain('hubctl repos clone <repo>')
+        expect(env.next_actions).toContain('hubctl repos topics <repo>')
+      })
+    )
+
+    it.effect('fails with NotFoundError when the repo 404s', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(reposCommand, ['show', 'octocat/missing'], {
+          github: { fail: { 'GET /repos/{owner}/{repo}': 404 } },
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('repos.show')
+        expect(env.error?.code).toBe('NotFoundError')
+      })
+    )
+  })
 })
