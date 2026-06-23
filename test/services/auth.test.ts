@@ -1,0 +1,53 @@
+import { describe, expect, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Layer from 'effect/Layer'
+import * as O from 'effect/Option'
+
+import { AuthError } from '../../src/github/errors'
+import { Auth } from '../../src/services/auth'
+import { FakeGithub } from '../helpers/fake-github'
+
+// Auth depends only on Github; over FakeGithub canned routes it resolves the
+// authenticated identity (`GET /user`) and the token's rate-limit budget
+// (`GET /rate_limit`). A 401 on `/user` must surface the mapped AuthError in
+// the typed `E` channel (asserted via exit, like the Github client test).
+
+describe('Auth service', () => {
+  const goodAuth = Auth.layer.pipe(
+    Layer.provide(
+      FakeGithub.layer({
+        routes: {
+          'GET /user': { login: 'octocat', name: 'The Octocat', id: 583_231 },
+          'GET /rate_limit': {
+            rate: { limit: 5000, remaining: 4999, reset: 1_700_000_000, used: 1 },
+          },
+        },
+      })
+    )
+  )
+
+  it.effect('status returns login, name and rate limit on a good token', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth
+      const status = yield* auth.status
+      expect(status.login).toBe('octocat')
+      expect(status.name).toBe('The Octocat')
+      expect(status.rateLimit).toEqual({ limit: 5000, remaining: 4999, reset: 1_700_000_000, used: 1 })
+    }).pipe(Effect.provide(goodAuth))
+  )
+
+  const unauthorizedAuth = Auth.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /user': 401 } })))
+
+  it.effect('status surfaces AuthError when /user 401s', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth
+      const exit = yield* Effect.exit(auth.status)
+      expect(Exit.isFailure(exit)).toBe(true)
+      const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+      expect(error).toBeInstanceOf(AuthError)
+      expect(error?._tag).toBe('AuthError')
+    }).pipe(Effect.provide(unauthorizedAuth))
+  )
+})
