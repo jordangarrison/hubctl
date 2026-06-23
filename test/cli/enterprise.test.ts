@@ -217,4 +217,58 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('billing', () => {
+    const usagePayload = {
+      usageItems: [{ product: 'actions', sku: 'Actions Linux', unitType: 'Minutes', quantity: 1000, netAmount: 8 }],
+    }
+
+    it.effect('usage emits the structured summary', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['billing', 'usage', 'acme'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/settings/billing/usage': usagePayload } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.billing.usage')
+        expect(env.result).toMatchObject({ enterprise: 'acme', total_cost: 8 })
+      })
+    )
+
+    it.effect('actions emits the structured summary', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['billing', 'actions', 'acme'], {
+          github: { routes: { 'GET /enterprises/{enterprise}/settings/billing/usage': usagePayload } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.billing.actions')
+        expect(env.result).toMatchObject({ enterprise: 'acme' })
+      })
+    )
+
+    it.effect('packages emits the raw payload', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['billing', 'packages', 'acme'], {
+          github: {
+            routes: { 'GET /enterprises/{enterprise}/billing/packages': { total_gigabytes_bandwidth_used: 10 } },
+          },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.billing.packages')
+        expect(env.result).toMatchObject({ total_gigabytes_bandwidth_used: 10 })
+      })
+    )
+
+    it.effect('shared-storage emits the raw payload', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['billing', 'shared-storage', 'acme'], {
+          github: {
+            routes: { 'GET /enterprises/{enterprise}/billing/shared-storage': { days_left_in_billing_cycle: 20 } },
+          },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.billing.shared-storage')
+        expect(env.result).toMatchObject({ days_left_in_billing_cycle: 20 })
+      })
+    )
+  })
 })

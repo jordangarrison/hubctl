@@ -319,9 +319,73 @@ const ownersCommand = Command.make('owners').pipe(
   Command.withSubcommands(ownersSubcommands)
 )
 
+// === billing ===
+
+const billingNextActions = ['hubctl enterprise billing packages <enterprise>']
+
+const usageCommand = Command.make('usage', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise usage billing summary'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.billing.usage', ent.billing(enterprise), { next_actions: billingNextActions })
+      )
+    )
+  )
+)
+
+// `actions` is an alias for the usage summary (the Ruby `billing` command pulls
+// the unified usage endpoint and the actions section is part of that summary).
+const actionsCommand = Command.make('actions', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise GitHub Actions billing summary'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.billing.actions', ent.billing(enterprise), { next_actions: billingNextActions })
+      )
+    )
+  )
+)
+
+const packagesCommand = Command.make('packages', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise Packages billing'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.billing.packages', ent.packagesBilling(enterprise), { next_actions: billingNextActions })
+      )
+    )
+  )
+)
+
+const sharedStorageCommand = Command.make('shared-storage', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise shared-storage billing'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.billing.shared-storage', ent.sharedStorageBilling(enterprise), {
+          next_actions: billingNextActions,
+        })
+      )
+    )
+  )
+)
+
+const billingSubcommands = [usageCommand, actionsCommand, packagesCommand, sharedStorageCommand] as const
+
+const billingCommand = Command.make('billing').pipe(
+  Command.withDescription('Show enterprise billing information'),
+  Command.withHandler(() =>
+    Output.pipe(
+      Effect.flatMap((output) => output.ok('enterprise.billing', { commands: billingSubcommands.map(toEntry) }))
+    )
+  ),
+  Command.withSubcommands(billingSubcommands)
+)
+
 // === group discovery ===
 
-const subcommands = [orgsCommand, membersCommand, ownersCommand] as const
+const subcommands = [orgsCommand, membersCommand, ownersCommand, billingCommand] as const
 
 export const enterpriseCommand = (): Command.Command<
   'enterprise',

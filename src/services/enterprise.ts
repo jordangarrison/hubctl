@@ -174,6 +174,11 @@ export interface RemoveOwnerResult {
 
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  // Raw packages/shared-storage billing payloads (lib/hubctl/github_client.rb
+  // #enterprise_packages_billing / #enterprise_shared_storage_billing). The Ruby
+  // emits these verbatim, so the port surfaces the decoded object as-is.
+  readonly packagesBilling: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
+  readonly sharedStorageBilling: (enterprise: string) => Effect.Effect<Record<string, unknown>, GithubError>
   readonly members: (
     enterprise: string,
     input: MembersInput
@@ -366,6 +371,11 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
   ...(input.billingEmail === undefined ? {} : { billing_email: input.billingEmail }),
 })
 
+// Decode an arbitrary JSON object into a plain record (the raw billing payloads
+// the Ruby emits verbatim).
+const RawObject = Schema.Record(Schema.String, Schema.Unknown)
+const decodeRawObject = Schema.decodeUnknownSync(RawObject)
+
 // === Members & owners helpers ===
 
 // Raw consumed-license user record (lib/hubctl/github_client.rb consumed-licenses
@@ -498,6 +508,16 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           Effect.withSpan('Enterprise.members')
         )
 
+      const packagesBilling: EnterpriseShape['packagesBilling'] = (enterprise) =>
+        github
+          .request('GET /enterprises/{enterprise}/billing/packages', { enterprise })
+          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.packagesBilling'))
+
+      const sharedStorageBilling: EnterpriseShape['sharedStorageBilling'] = (enterprise) =>
+        github
+          .request('GET /enterprises/{enterprise}/billing/shared-storage', { enterprise })
+          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.sharedStorageBilling'))
+
       const owners: EnterpriseShape['owners'] = (enterprise) =>
         fetchAllUsers(enterprise).pipe(
           Effect.map((users) => users.filter(isOwner).map(transformMember)),
@@ -553,6 +573,8 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
 
       return {
         billing,
+        packagesBilling,
+        sharedStorageBilling,
         members,
         owners,
         addOwner,

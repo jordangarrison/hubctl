@@ -256,4 +256,44 @@ describe('Enterprise service', () => {
       }).pipe(Effect.provide(withRoutes({ routes: { 'DELETE /enterprises/{enterprise}/owners/{username}': {} } })))
     )
   })
+
+  describe('packages & shared-storage billing', () => {
+    it.effect('returns the raw packages billing payload', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.packagesBilling(enterprise)
+        expect(result).toEqual({ total_gigabytes_bandwidth_used: 10, total_paid_gigabytes_bandwidth_used: 2 })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /enterprises/{enterprise}/billing/packages': {
+                total_gigabytes_bandwidth_used: 10,
+                total_paid_gigabytes_bandwidth_used: 2,
+              },
+            },
+          })
+        )
+      )
+    )
+
+    it.effect('returns the raw shared-storage billing payload', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.sharedStorageBilling(enterprise)
+        expect(result).toEqual({ days_left_in_billing_cycle: 20, estimated_paid_storage_for_month: 5 })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /enterprises/{enterprise}/billing/shared-storage': {
+                days_left_in_billing_cycle: 20,
+                estimated_paid_storage_for_month: 5,
+              },
+            },
+          })
+        )
+      )
+    )
+  })
 })
