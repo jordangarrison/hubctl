@@ -15,7 +15,9 @@ export type TeamPrivacy = 'secret' | 'closed'
 export type TeamPermission = 'pull' | 'triage' | 'push' | 'maintain' | 'admin'
 export type TeamRole = 'member' | 'maintainer'
 
-// Row shape for `teams list` (lib/hubctl/teams.rb#list `team_data`).
+// Row shape for `teams list` (lib/hubctl/teams.rb#list `team_data`). The list
+// endpoint (GET /orgs/{org}/teams) does NOT return members_count/repos_count —
+// only the detail endpoint does — so those collapse to '-' when absent.
 export interface TeamListItem {
   readonly id: number
   readonly name: string
@@ -23,8 +25,8 @@ export interface TeamListItem {
   readonly description: string
   readonly privacy: string
   readonly permission: string
-  readonly members_count: number
-  readonly repos_count: number
+  readonly members_count: number | '-'
+  readonly repos_count: number | '-'
 }
 
 export interface CreateInput {
@@ -77,7 +79,9 @@ export interface TeamsShape {
 }
 
 // Raw team payload fields read by `list`. `description` is nullable on the wire;
-// the contract collapses it to '-' (matching the Ruby).
+// the contract collapses it to '-' (matching the Ruby). members_count/repos_count
+// are NOT returned by GET /orgs/{org}/teams (only the detail endpoint returns
+// them), so they are optional here and collapse to '-' when absent.
 const TeamSummary = Schema.Struct({
   id: Schema.Finite,
   name: Schema.String,
@@ -85,8 +89,8 @@ const TeamSummary = Schema.Struct({
   description: Schema.NullOr(Schema.String),
   privacy: Schema.String,
   permission: Schema.String,
-  members_count: Schema.Finite,
-  repos_count: Schema.Finite,
+  members_count: Schema.optional(Schema.Finite),
+  repos_count: Schema.optional(Schema.Finite),
 })
 const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(TeamSummary))
 
@@ -97,8 +101,8 @@ const toListItem = (team: typeof TeamSummary.Type): TeamListItem => ({
   description: team.description ?? '-',
   privacy: team.privacy,
   permission: team.permission,
-  members_count: team.members_count,
-  repos_count: team.repos_count,
+  members_count: team.members_count ?? '-',
+  repos_count: team.repos_count ?? '-',
 })
 
 // Created-team summary fields (lib/hubctl/teams.rb#create).

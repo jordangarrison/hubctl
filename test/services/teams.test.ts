@@ -73,6 +73,39 @@ describe('Teams service', () => {
       )
     )
 
+    // GET /orgs/{org}/teams (the list endpoint) does NOT return members_count or
+    // repos_count — only the detail endpoint does. The list schema must tolerate
+    // their absence and render '-' rather than throwing a decode defect.
+    it.effect('decodes list rows that OMIT members_count/repos_count and renders "-"', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.list('acme')
+        expect(result[0]?.members_count).toBe('-')
+        expect(result[0]?.repos_count).toBe('-')
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams': [
+                    {
+                      id: 7,
+                      name: 'Core',
+                      slug: 'core',
+                      description: 'Core maintainers',
+                      privacy: 'closed',
+                      permission: 'push',
+                    },
+                  ],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
     it.effect('surfaces NotFoundError when the org 404s', () =>
       Effect.gen(function* () {
         const teams = yield* Teams

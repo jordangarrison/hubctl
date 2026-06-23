@@ -92,6 +92,31 @@ describe('teams command', () => {
       })
     )
 
+    it.effect('decodes list rows that OMIT members_count/repos_count and renders "-"', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['list', '--org', 'acme'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/teams': [
+                {
+                  id: 7,
+                  name: 'Core',
+                  slug: 'core',
+                  description: 'Core maintainers',
+                  privacy: 'closed',
+                  permission: 'push',
+                },
+              ],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.list')
+        expect(env.result).toMatchObject([{ slug: 'core', members_count: '-', repos_count: '-' }])
+      })
+    )
+
     it.effect('surfaces an ok:false envelope with a fix when the org 404s', () =>
       Effect.gen(function* () {
         const env = yield* runCli(teamsCommand, ['list', '--org', 'missing'], {
