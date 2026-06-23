@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
+import * as Stream from 'effect/Stream'
 import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
@@ -418,9 +419,11 @@ const auditPerPageFlag = Flag.integer('per-page').pipe(
   Flag.withDescription('Number of entries per page')
 )
 
-// The audit-log handler returns the full paged result for now. Phase 8.1 wraps
-// the same `Enterprise.auditLog` seam in NDJSON streaming (one entry per line +
-// a terminal envelope); the command stays the integration point.
+// The audit-log handler streams NDJSON: it tags each entry as a
+// `{type:'audit-entry', ...}` event so `Output.stream` writes one JSON object
+// per line, then a terminal envelope whose `result` is the array of those
+// events (a non-streaming consumer reads only the final line). `Enterprise.auditLog`
+// is the clean seam; we lift its paged array into a `Stream` of tagged events.
 const auditLogCommand = Command.make('audit-log', {
   enterprise: enterpriseArg,
   order: orderFlag,
@@ -431,20 +434,27 @@ const auditLogCommand = Command.make('audit-log', {
 }).pipe(
   Command.withDescription('Show enterprise audit log'),
   Command.withHandler(({ after, before, enterprise, order, perPage, phrase }) =>
-    Enterprise.pipe(
-      Effect.flatMap((ent) => {
-        const input: AuditLogInput = {
-          order,
-          ...optionalField('phrase', phrase),
-          ...optionalField('after', after),
-          ...optionalField('before', before),
-          ...optionalNumber('perPage', perPage),
-        }
-        return emit('enterprise.audit-log', ent.auditLog(enterprise, input), {
-          next_actions: ['hubctl enterprise stats <enterprise>'],
-        })
+    Effect.gen(function* () {
+      const ent = yield* Enterprise
+      const output = yield* Output
+      const input: AuditLogInput = {
+        order,
+        ...optionalField('phrase', phrase),
+        ...optionalField('after', after),
+        ...optionalField('before', before),
+        ...optionalNumber('perPage', perPage),
+      }
+      const events$ = Stream.fromArrayEffect(ent.auditLog(enterprise, input)).pipe(
+        Stream.map((entry) => ({ type: 'audit-entry', ...entry }))
+      )
+      // A typed Github error becomes a `Output.fail` envelope on the final line;
+      // success streams the entries then the terminal envelope (already written
+      // by `output.stream`, so the success branch is a no-op).
+      yield* Effect.matchEffect(output.stream('enterprise.audit-log', events$), {
+        onFailure: (error) => output.fail('enterprise.audit-log', error),
+        onSuccess: () => Effect.void,
       })
-    )
+    })
   )
 )
 

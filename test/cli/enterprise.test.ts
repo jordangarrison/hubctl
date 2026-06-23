@@ -302,14 +302,18 @@ describe('enterprise command', () => {
       },
     ]
 
-    it.effect('emits shaped paged audit entries', () =>
+    // audit-log streams NDJSON: one `{type:'audit-entry', ...}` line per entry,
+    // then a terminal envelope whose `result` is the array of those tagged
+    // events (so a non-streaming consumer parses the final line). `runCli`
+    // returns the parsed terminal (last) line.
+    it.effect('emits shaped audit entries as the terminal envelope result', () =>
       Effect.gen(function* () {
         const env = yield* runCli(enterpriseCommand, ['audit-log', 'acme'], {
           github: { routes: { [auditRoute]: entries } },
         })
         expect(env.ok).toBe(true)
         expect(env.command).toBe('enterprise.audit-log')
-        expect(env.result).toMatchObject([{ action: 'repo.create', actor: 'alice' }])
+        expect(env.result).toMatchObject([{ type: 'audit-entry', action: 'repo.create', actor: 'alice' }])
       })
     )
 
@@ -333,7 +337,7 @@ describe('enterprise command', () => {
           }
         )
         expect(env.ok).toBe(true)
-        expect(env.result).toMatchObject([{ action: 'repo.create' }])
+        expect(env.result).toMatchObject([{ type: 'audit-entry', action: 'repo.create' }])
       })
     )
   })
