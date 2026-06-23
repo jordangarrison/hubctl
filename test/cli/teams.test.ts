@@ -19,6 +19,14 @@ const teamPayload = {
   repos_count: 12,
 }
 
+const memberPayload = {
+  login: 'octocat',
+  id: 1,
+  type: 'User',
+  site_admin: false,
+  html_url: 'https://github.com/octocat',
+}
+
 const TeamListItem = Schema.Struct({
   id: Schema.Finite,
   name: Schema.String,
@@ -30,6 +38,17 @@ const TeamListItem = Schema.Struct({
   repos_count: Schema.Finite,
 })
 const decodeList = Schema.decodeUnknownSync(Schema.Array(TeamListItem))
+
+const TeamMember = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  type: Schema.String,
+  // `site_admin` is GitHub's wire field name; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  site_admin: Schema.Boolean,
+  url: Schema.String,
+})
+const decodeMembers = Schema.decodeUnknownSync(Schema.Array(TeamMember))
 
 const GroupTree = Schema.Struct({
   commands: Schema.Array(Schema.Struct({ name: Schema.String, description: Schema.String })),
@@ -47,6 +66,7 @@ describe('teams command', () => {
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('list')
       expect(names).toContain('create')
+      expect(names).toContain('members')
     })
   )
 
@@ -116,6 +136,23 @@ describe('teams command', () => {
 
         expect(env.ok).toBe(true)
         expect(env.result).toMatchObject({ slug: 'squad' })
+      })
+    )
+  })
+
+  describe('members', () => {
+    it.effect('emits a teams.members envelope with shaped rows', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['members', 'core', '--org', 'acme'], {
+          github: { routes: { 'GET /orgs/{org}/teams/{team_slug}/members': [memberPayload] } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.members')
+
+        const rows = decodeMembers(env.result)
+        expect(rows[0]?.login).toBe('octocat')
+        expect(env.next_actions).toContain('hubctl teams add <team> <user> --org <org>')
       })
     )
   })

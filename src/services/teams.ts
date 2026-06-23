@@ -42,9 +42,19 @@ export interface CreatedTeam {
   readonly permission: string
 }
 
+// Row shape for `teams members` (lib/hubctl/teams.rb#members `member_data`).
+export interface TeamMember {
+  readonly login: string
+  readonly id: number
+  readonly type: string
+  readonly site_admin: boolean
+  readonly url: string
+}
+
 export interface TeamsShape {
   readonly list: (org: string) => Effect.Effect<ReadonlyArray<TeamListItem>, GithubError>
   readonly create: (org: string, name: string, input: CreateInput) => Effect.Effect<CreatedTeam, GithubError>
+  readonly members: (org: string, team: string) => Effect.Effect<ReadonlyArray<TeamMember>, GithubError>
 }
 
 // Raw team payload fields read by `list`. `description` is nullable on the wire;
@@ -92,6 +102,26 @@ const createBody = (name: string, input: CreateInput): Record<string, unknown> =
   ...(input.description === undefined ? {} : { description: input.description }),
 })
 
+// Raw member payload fields read by `members`.
+const Member = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  type: Schema.String,
+  // `site_admin` is GitHub's wire field name; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  site_admin: Schema.Boolean,
+  html_url: Schema.String,
+})
+const decodeMembers = Schema.decodeUnknownSync(Schema.Array(Member))
+
+const toMember = (member: typeof Member.Type): TeamMember => ({
+  login: member.login,
+  id: member.id,
+  type: member.type,
+  site_admin: member.site_admin,
+  url: member.html_url,
+})
+
 export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
   static readonly layer: Layer.Layer<Teams, never, Github> = Layer.effect(
     Teams,
@@ -110,7 +140,14 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
           .request('POST /orgs/{org}/teams', { org, ...createBody(name, input) })
           .pipe(Effect.map(decodeCreated), Effect.withSpan('Teams.create'))
 
-      return { list, create }
+      const members: TeamsShape['members'] = (org, team) =>
+        github.paginate('GET /orgs/{org}/teams/{team_slug}/members', { org, team_slug: team }).pipe(
+          Effect.map(decodeMembers),
+          Effect.map((list_) => list_.map(toMember)),
+          Effect.withSpan('Teams.members')
+        )
+
+      return { list, create, members }
     })
   )
 }

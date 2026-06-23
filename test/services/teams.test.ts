@@ -25,6 +25,14 @@ const teamPayload = {
   repos_count: 12,
 }
 
+const memberPayload = {
+  login: 'octocat',
+  id: 1,
+  type: 'User',
+  site_admin: false,
+  html_url: 'https://github.com/octocat',
+}
+
 describe('Teams service', () => {
   describe('list', () => {
     it.effect('lists org teams via GET /orgs/{org}/teams', () =>
@@ -118,6 +126,51 @@ describe('Teams service', () => {
                 },
               })
             )
+          )
+        )
+      )
+    )
+  })
+
+  describe('members', () => {
+    it.effect('lists team members via GET /orgs/{org}/teams/{team_slug}/members', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.members('acme', 'core')
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          login: 'octocat',
+          id: 1,
+          type: 'User',
+          site_admin: false,
+          url: 'https://github.com/octocat',
+        })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams/{team_slug}/members': (params: Record<string, unknown>) =>
+                    params.org === 'acme' && params.team_slug === 'core' ? [memberPayload] : [],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError when the team 404s', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.members('acme', 'missing'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/teams/{team_slug}/members': 404 } }))
           )
         )
       )
