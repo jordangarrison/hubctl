@@ -21,7 +21,6 @@
     "fallow": "fallow audit --quiet",
     "build:local": "bun build --compile --outfile dist/hubctl src/main.ts",
     "validate": "bun run format && bun run lint && bun run typecheck && bun run test && bun run ast-grep",
-    "validate:full": "bun run validate && bun run fallow",
     "postinstall": "effect-language-service patch && effect-tsgo patch",
     "prepare": "simple-git-hooks || true"
   },
@@ -48,7 +47,6 @@
     "@mpsuesser/oxlint-plugin-effect": "^0.3.0",
     "@types/bun": "^1.3.14",
     "@typescript/native-preview": "^7.0.0-dev.20260622.1",
-    "fallow": "^2.101.0",
     "nano-staged": "^1.0.2",
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",

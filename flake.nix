@@ -11,6 +11,30 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        # fallow (dead-code audit) ships only as a prebuilt generic-glibc binary
+        # on npm, which NixOS can't run directly, and it isn't in nixpkgs. The
+        # recommended NixOS pattern for a prebuilt binary is autoPatchelfHook —
+        # self-contained in this flake, no system dependency (no nix-ld). Built
+        # for x86_64-linux (the dev/CI target); other systems omit it.
+        fallow = pkgs.stdenvNoCC.mkDerivation rec {
+          pname = "fallow";
+          version = "2.101.0";
+          src = pkgs.fetchurl {
+            url = "https://registry.npmjs.org/@fallow-cli/linux-x64-gnu/-/linux-x64-gnu-${version}.tgz";
+            hash = "sha256-SXlHYSok+70ZcrsobHhcuYxAOAZzlTCNCx6sfeTjja8=";
+          };
+          sourceRoot = "package";
+          nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+          buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 fallow $out/bin/fallow
+            runHook postInstall
+          '';
+        };
+
+        supportsFallow = system == "x86_64-linux";
+
         # Toolchain provided by Nix. Bun is the runtime / package manager and
         # drives the project scripts; Node is kept on PATH because a few dev
         # tools still shell out to a Node resolver. The rest of the toolchain
@@ -26,7 +50,7 @@
           # The package.json `ast-grep`/`ast-grep:test` scripts resolve this one
           # off PATH since @ast-grep/cli is intentionally not an npm dep.
           ast-grep
-        ];
+        ] ++ pkgs.lib.optionals supportsFallow [ fallow ];
       in
       {
         # The compiled-binary package derivation is added in the cutover phase
