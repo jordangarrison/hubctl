@@ -8,6 +8,7 @@ import * as R from 'effect/Record'
 import * as Schema from 'effect/Schema'
 
 import { Github } from '../github/client'
+import { ValidationError } from '../github/errors'
 import type { GithubError } from '../github/errors'
 
 // Domain service for the `enterprise` command group. This file currently
@@ -261,6 +262,24 @@ export interface UpdateSecurityResult {
   readonly updated: boolean
 }
 
+// === Detail (show) ===
+
+// Enterprise detail (lib/hubctl/github_client.rb#enterprise +
+// lib/hubctl/enterprise.rb#show). Enterprise Cloud has no
+// `/enterprises/{enterprise}` detail endpoint, so the Ruby resolves the account
+// via `GET /orgs/{org}`, requires `plan.name == 'enterprise'`, and surfaces the
+// populated subset (the other CLI fields are nil on this workaround path).
+export interface EnterpriseDetail {
+  readonly login: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly name: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly description: string | null
+  readonly plan: string
+  readonly created_at: string
+  readonly updated_at: string
+}
+
 // === Stats ===
 
 // Labeled stats report sections (lib/hubctl/enterprise.rb#stats). Each section
@@ -327,6 +346,10 @@ export interface EnterpriseStats {
 
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  // Enterprise detail via the org-endpoint workaround (lib/hubctl/enterprise.rb
+  // #show). Fails with a ValidationError when the resolved org is not an
+  // enterprise account.
+  readonly show: (enterprise: string) => Effect.Effect<EnterpriseDetail, GithubError>
   readonly listSsoAuthorizations: (enterprise: string) => Effect.Effect<ReadonlyArray<SsoAuthorization>, GithubError>
   readonly showSsoAuthorization: (
     enterprise: string,
@@ -556,6 +579,20 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
 // the Ruby emits verbatim).
 const RawObject = Schema.Record(Schema.String, Schema.Unknown)
 const decodeRawObject = Schema.decodeUnknownSync(RawObject)
+
+// === Detail (show) helpers ===
+
+// Org payload read by `show` (the Enterprise-Cloud workaround). `plan.name`
+// drives the enterprise-account gate; the other fields are surfaced verbatim.
+const EnterpriseDetailRaw = Schema.Struct({
+  login: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+  created_at: Schema.String,
+  updated_at: Schema.String,
+})
+const decodeEnterpriseDetail = Schema.decodeUnknownSync(EnterpriseDetailRaw)
 
 // === Stats helpers ===
 
@@ -923,6 +960,33 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .request('GET /enterprises/{enterprise}/stats/all', { enterprise })
           .pipe(Effect.map(decodeStats), Effect.map(toStats), Effect.withSpan('Enterprise.stats'))
 
+      // Enterprise Cloud exposes no `/enterprises/{enterprise}` detail endpoint;
+      // resolve via `GET /orgs/{org}` and require `plan.name == 'enterprise'`
+      // (lib/hubctl/github_client.rb#enterprise), failing with a ValidationError
+      // otherwise.
+      const show: EnterpriseShape['show'] = (enterprise) =>
+        github.request('GET /orgs/{org}', { org: enterprise }).pipe(
+          Effect.map(decodeEnterpriseDetail),
+          Effect.flatMap((org) =>
+            org.plan?.name === 'enterprise'
+              ? Effect.succeed<EnterpriseDetail>({
+                  login: org.login,
+                  name: org.name ?? null,
+                  description: org.description ?? null,
+                  plan: org.plan.name,
+                  created_at: org.created_at,
+                  updated_at: org.updated_at,
+                })
+              : Effect.fail(
+                  new ValidationError({
+                    message: `Organization ${enterprise} is not an enterprise account`,
+                    fix: 'Provide the slug of an enterprise account',
+                  })
+                )
+          ),
+          Effect.withSpan('Enterprise.show')
+        )
+
       const securityAnalysis: EnterpriseShape['securityAnalysis'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/code_security_analysis', { enterprise })
@@ -991,6 +1055,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
 
       return {
         billing,
+        show,
         packagesBilling,
         sharedStorageBilling,
         consumedLicenses,

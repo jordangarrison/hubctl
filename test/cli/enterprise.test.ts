@@ -21,9 +21,55 @@ describe('enterprise command', () => {
       expect(env.command).toBe('enterprise')
       const tree = decodeGroup(env.result)
       const names = tree.commands.map((c) => c.name)
+      expect(names).toContain('show')
       expect(names).toContain('orgs')
     })
   )
+
+  describe('show', () => {
+    it.effect('emits the enterprise detail resolved via the org endpoint', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['show', 'acme'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}': {
+                login: 'acme',
+                name: 'Acme Inc',
+                description: 'The Acme enterprise',
+                plan: { name: 'enterprise' },
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
+              },
+            },
+          },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.show')
+        expect(env.result).toMatchObject({ login: 'acme', name: 'Acme Inc', plan: 'enterprise' })
+      })
+    )
+
+    it.effect('fails when the org is not an enterprise account', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['show', 'acme'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}': {
+                login: 'acme',
+                name: 'Acme Inc',
+                description: null,
+                plan: { name: 'free' },
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
+              },
+            },
+          },
+        })
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('enterprise.show')
+      })
+    )
+  })
 
   describe('orgs', () => {
     const orgPayload = {

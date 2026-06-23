@@ -5,7 +5,7 @@ import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
-import { NotFoundError } from '../../src/github/errors'
+import { NotFoundError, ValidationError } from '../../src/github/errors'
 import { Enterprise } from '../../src/services/enterprise'
 import { FakeGithub } from '../helpers/fake-github'
 import type { FakeGithubConfig } from '../helpers/fake-github'
@@ -495,6 +495,67 @@ describe('Enterprise service', () => {
               'GET /enterprises/{enterprise}/stats/all': {
                 repos: { total_repos: 100, root_repos: 80, fork_repos: 20, org_repos: 60 },
                 users: { total_users: 50, admin_users: 5, suspended_users: 2 },
+              },
+            },
+          })
+        )
+      )
+    )
+  })
+
+  describe('show', () => {
+    // Mirrors lib/hubctl/github_client.rb#enterprise + lib/hubctl/enterprise.rb#show:
+    // Enterprise Cloud has no /enterprises/{enterprise} detail endpoint, so the
+    // Ruby resolves the enterprise via GET /orgs/{org}, requires plan.name ==
+    // 'enterprise', and surfaces the populated subset.
+    it.effect('resolves the enterprise via the org endpoint and shapes the detail', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.show(enterprise)
+        expect(result).toEqual({
+          login: 'acme',
+          name: 'Acme Inc',
+          description: 'The Acme enterprise',
+          plan: 'enterprise',
+          created_at: '2020-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /orgs/{org}': {
+                login: 'acme',
+                name: 'Acme Inc',
+                description: 'The Acme enterprise',
+                plan: { name: 'enterprise' },
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
+              },
+            },
+          })
+        )
+      )
+    )
+
+    it.effect('fails with a ValidationError when the org is not an enterprise account', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const exit = yield* Effect.exit(ent.show(enterprise))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(ValidationError)
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /orgs/{org}': {
+                login: 'acme',
+                name: 'Acme Inc',
+                description: null,
+                plan: { name: 'free' },
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
               },
             },
           })

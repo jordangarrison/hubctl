@@ -42,6 +42,21 @@ const confirmDestructive = (
   return Prompt.run(Prompt.confirm({ message })).pipe(Effect.orElseSucceed(() => false))
 }
 
+// === show ===
+
+const showCommand = Command.make('show', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise details'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.show', ent.show(enterprise), {
+          next_actions: ['hubctl enterprise stats <enterprise>', 'hubctl enterprise orgs list <enterprise>'],
+        })
+      )
+    )
+  )
+)
+
 // === orgs ===
 
 const perPageFlag = Flag.integer('per-page').pipe(
@@ -633,6 +648,7 @@ const securityAnalysisCommand = Command.make('security-analysis').pipe(
 // === group discovery ===
 
 const subcommands = [
+  showCommand,
   orgsCommand,
   membersCommand,
   ownersCommand,
