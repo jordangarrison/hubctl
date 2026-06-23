@@ -41,6 +41,28 @@ export default defineConfig({
         'effect/avoid-native-object-helpers': 'off',
       },
     },
+    {
+      // The e2e suite is deliberately OUTSIDE the Effect runtime: it spawns the
+      // compiled `dist/hubctl` binary as a real subprocess and drives it over a
+      // mock HTTP server, asserting on the OS-level contract (stdout + exit
+      // code). That is exactly the boundary the Effect-native service rules
+      // (FileSystem/HttpClient/CommandExecutor/Path) are meant to keep OUT of
+      // domain code — here the raw `node:*` host APIs ARE the system under test,
+      // mirroring the `scripts/compile.ts` build script. Relax those rules for
+      // this directory rather than peppering ~15 per-line disables.
+      files: ['**/test/e2e/**/*.ts'],
+      rules: {
+        'effect/use-command-executor-service': 'off',
+        'effect/use-filesystem-service': 'off',
+        'effect/use-http-client-service': 'off',
+        'effect/use-path-service': 'off',
+        'effect/avoid-node-imports': 'off',
+        'effect/avoid-sync-fs': 'off',
+        'effect/avoid-untagged-errors': 'off',
+        'effect/avoid-try-catch': 'off',
+        'unicorn/import-style': 'off',
+      },
+    },
   ],
   rules: {
     ...effect.configs.recommended.rules,

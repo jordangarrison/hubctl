@@ -79,6 +79,15 @@
             "options": {
               "diagnosticSeverity": { "strictEffectProvide": "off" }
             }
+          },
+          {
+            "include": ["**/test/e2e/**/*.ts"],
+            "options": {
+              "diagnosticSeverity": {
+                "nodeBuiltinImport": "off",
+                "asyncFunction": "off"
+              }
+            }
           }
         ]
       }

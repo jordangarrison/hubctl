@@ -94,7 +94,23 @@ export class Output extends Context.Service<Output, OutputShape>()('Output') {
       ok: (command, result, opts) =>
         Console.log(render(options.mode, makeOk(command, result, opts?.next_actions ?? []), renderOptions)),
       fail: (command, error) =>
-        Console.log(render(options.mode, makeErr(command, toEnvelopeError(error), error.fix ?? null), renderOptions)),
+        // Render the `ok:false` envelope, then mark the process for a non-zero
+        // exit so a shell/agent sees the failure in `$?` (not just the JSON
+        // body). Setting `process.exitCode` (rather than failing the effect)
+        // keeps `emit` returning a successful void — the command pipeline and
+        // its tests assert on the printed envelope, unchanged — while
+        // `BunRuntime.runMain`'s success teardown leaves a non-zero `exitCode`
+        // intact (it only force-exits on a 0 code). This is the CLI edge that
+        // bridges Effect to the OS exit status, hence the direct `process` use.
+        Console.log(
+          render(options.mode, makeErr(command, toEnvelopeError(error), error.fix ?? null), renderOptions)
+        ).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              process.exitCode = 1
+            })
+          )
+        ),
       stream: (command, events$) => writeStream(options.mode, renderOptions, command, events$),
     })
   }
