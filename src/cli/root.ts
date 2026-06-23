@@ -4,6 +4,8 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import type { Auth } from '../services/auth'
+import type { Repos } from '../services/repos'
+import { reposCommand } from './repos'
 import { versionCommand } from './version'
 
 // The root `hubctl` command. With no subcommand it emits an `ok` envelope whose
@@ -44,8 +46,8 @@ const toEntry = (command: {
 
 export const rootCommand = (
   version: string
-): Command.Command<'hubctl', Record<string, never>, Record<string, never>, never, Output | Auth> => {
-  const subcommands = [versionCommand(version)] as const
+): Command.Command<'hubctl', Record<string, never>, Record<string, never>, never, Output | Auth | Repos> => {
+  const subcommands = [versionCommand(version), reposCommand()] as const
   const tree: CommandTree = { commands: subcommands.map(toEntry) }
 
   return Command.make('hubctl').pipe(

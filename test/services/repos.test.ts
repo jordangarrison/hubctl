@@ -1,0 +1,109 @@
+import { describe, expect, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Layer from 'effect/Layer'
+import * as O from 'effect/Option'
+
+import { NotFoundError } from '../../src/github/errors'
+import { Repos } from '../../src/services/repos'
+import { FakeGithub } from '../helpers/fake-github'
+
+// Repos depends only on Github (clone additionally needs a git runner, exercised
+// in the command test). Over FakeGithub canned routes the service shapes each
+// payload to mirror the Ruby `Hubctl::Repos` data, and surfaces typed
+// GithubErrors in the `E` channel.
+
+const repoPayload = {
+  name: 'hello',
+  full_name: 'octocat/hello',
+  private: false,
+  description: 'A test repo',
+  language: 'TypeScript',
+  fork: false,
+  size: 128,
+  stargazers_count: 42,
+  watchers_count: 7,
+  forks_count: 3,
+  open_issues_count: 1,
+  default_branch: 'main',
+  created_at: '2020-01-01T00:00:00Z',
+  updated_at: '2021-01-01T00:00:00Z',
+  pushed_at: '2021-02-01T00:00:00Z',
+  clone_url: 'https://github.com/octocat/hello.git',
+  ssh_url: 'git@github.com:octocat/hello.git',
+  html_url: 'https://github.com/octocat/hello',
+  topics: ['cli', 'effect'],
+}
+
+describe('Repos service', () => {
+  describe('list', () => {
+    it.effect('lists the authenticated user repos via GET /user/repos', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.list({ type: 'all', sort: 'updated', direction: 'desc' })
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          name: 'hello',
+          full_name: 'octocat/hello',
+          private: false,
+          description: 'A test repo',
+          language: 'TypeScript',
+          stars: 42,
+          forks: 3,
+          updated: '2021-01-01T00:00:00Z',
+        })
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /user/repos': [repoPayload] } })))
+        )
+      )
+    )
+
+    it.effect('lists org repos via GET /orgs/{org}/repos when org is set', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.list({ org: 'acme', type: 'all', sort: 'updated', direction: 'desc' })
+        expect(result).toHaveLength(1)
+        expect(result[0]?.name).toBe('hello')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /orgs/{org}/repos': [repoPayload] } })))
+        )
+      )
+    )
+
+    it.effect('defaults missing description/language to "-"', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const result = yield* repos.list({ type: 'all', sort: 'updated', direction: 'desc' })
+        expect(result[0]?.description).toBe('-')
+        expect(result[0]?.language).toBe('-')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /user/repos': [{ ...repoPayload, description: null, language: null }],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError when the org 404s', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        const exit = yield* Effect.exit(repos.list({ org: 'missing', type: 'all', sort: 'updated', direction: 'desc' }))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(Repos.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/repos': 404 } }))))
+      )
+    )
+  })
+})

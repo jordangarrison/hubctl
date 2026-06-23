@@ -9,6 +9,7 @@ import type { Envelope } from '../../src/output/envelope'
 import { Envelope as EnvelopeSchema } from '../../src/output/envelope'
 import { Output } from '../../src/output/service'
 import { Auth } from '../../src/services/auth'
+import { Repos } from '../../src/services/repos'
 import { FakeGithub } from './fake-github'
 import type { FakeGithubConfig } from './fake-github'
 
@@ -80,7 +81,7 @@ const DEFAULT_VERSION = '0.0.0-test'
 // dependencies (`Output | Auth`) are constrained, since those are what the test
 // layer supplies.
 export const runCli = <const Name extends string, Input, E, ContextInput>(
-  build: (version: string) => Command.Command<Name, Input, ContextInput, E, Output | Auth>,
+  build: (version: string) => Command.Command<Name, Input, ContextInput, E, Output | Auth | Repos>,
   argv: ReadonlyArray<string>,
   options: RunCliOptions = {}
 ): Effect.Effect<Envelope<unknown>> =>
@@ -90,13 +91,16 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
     const run = Command.runWith(build(version), { version })
 
     // One merged layer (not a chain of provides, which can break service
-    // lifecycle): the CLI `Environment`, the JSON `Output`, and `Auth` over the
-    // canned `FakeGithub`. Console is overridden separately (a service, not a
-    // layer) so stdout is captured rather than written.
+    // lifecycle): the CLI `Environment`, the JSON `Output`, and the domain
+    // services (`Auth`, `Repos`) over a single canned `FakeGithub`. Console is
+    // overridden separately (a service, not a layer) so stdout is captured
+    // rather than written.
+    const github = FakeGithub.layer(options.github ?? {})
     const testLayer = Layer.mergeAll(
       BunServices.layer,
       Output.layer({ mode: 'json' }),
-      Auth.layer.pipe(Layer.provide(FakeGithub.layer(options.github ?? {})))
+      Auth.layer.pipe(Layer.provide(github)),
+      Repos.layer.pipe(Layer.provide(github))
     )
 
     // CLI parse failures (`DuplicateOption`, `MissingArgument`, …) mean the test

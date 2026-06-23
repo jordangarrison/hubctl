@@ -7,6 +7,7 @@ import type { Mode } from '../output/mode'
 import { Output } from '../output/service'
 import { Auth } from '../services/auth'
 import { Config } from '../services/config'
+import { Repos } from '../services/repos'
 
 // The production application layer behind `src/main.ts`. It resolves the full
 // service graph the root command tree depends on (`Output | Auth`), grounded in
@@ -32,12 +33,13 @@ export interface AppLayerOptions {
   readonly noColor?: boolean
 }
 
-export const appLayer = (options: AppLayerOptions): Layer.Layer<Output | Auth | BunServices.BunServices> => {
+export const appLayer = (options: AppLayerOptions): Layer.Layer<Output | Auth | Repos | BunServices.BunServices> => {
   const github: Layer.Layer<Github> = Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
 
   return Layer.mergeAll(
     Output.layer({ mode: options.mode, ...(options.noColor === undefined ? {} : { noColor: options.noColor }) }),
     Auth.layer.pipe(Layer.provide(github)),
+    Repos.layer.pipe(Layer.provide(github)),
     BunServices.layer
   )
 }
