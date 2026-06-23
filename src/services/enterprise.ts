@@ -87,8 +87,68 @@ export interface BillingRow {
   readonly value: string
 }
 
+// === Organizations ===
+
+// Row shape for `enterprise orgs list` (lib/hubctl/enterprise.rb#organizations
+// `org_data`). Nullable wire fields collapse to the Ruby defaults.
+export interface EnterpriseOrg {
+  readonly login: string
+  readonly id: number
+  readonly description: string
+  readonly public_repos: number
+  readonly private_repos: number
+  readonly plan: string
+  readonly billing_email: string
+  readonly members_count: number
+  readonly teams_count: number
+  readonly created_at: string
+  readonly url: string
+}
+
+export interface OrganizationsInput {
+  readonly perPage?: number
+}
+
+export interface CreateOrgInput {
+  readonly displayName?: string
+  readonly description?: string
+  readonly billingEmail?: string
+}
+
+// Summary returned after creating an org (lib/hubctl/enterprise.rb#create_org
+// surfaces `id`/`html_url`).
+export interface CreatedOrg {
+  readonly id: number
+  readonly login: string
+  readonly url: string
+}
+
+// Confirmation of an org transfer into / removal from the enterprise.
+export interface TransferResult {
+  readonly enterprise: string
+  readonly organization: string
+  readonly transferred: boolean
+}
+
+export interface RemoveOrgResult {
+  readonly enterprise: string
+  readonly organization: string
+  readonly removed: boolean
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  readonly organizations: (
+    enterprise: string,
+    input: OrganizationsInput
+  ) => Effect.Effect<ReadonlyArray<EnterpriseOrg>, GithubError>
+  readonly createOrganization: (
+    enterprise: string,
+    login: string,
+    input: CreateOrgInput
+  ) => Effect.Effect<CreatedOrg, GithubError>
+  readonly transferOrganization: (enterprise: string, org: string) => Effect.Effect<TransferResult, GithubError>
+  readonly removeOrganization: (enterprise: string, org: string) => Effect.Effect<RemoveOrgResult, GithubError>
 }
 
 // Ruby `Float#round(n)`: half-up to `n` decimals. JS `Math.round` is half-up for
@@ -212,6 +272,57 @@ export const flattenBilling = (summary: BillingSummary): ReadonlyArray<BillingRo
   ...(summary.copilot === undefined ? [] : copilotRows(summary.copilot)),
 ]
 
+// Raw enterprise-org payload fields read by `organizations`. Several are
+// nullable/absent on the wire; the contract collapses them to the Ruby defaults.
+const EnterpriseOrgRaw = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  public_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  private_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+  billing_email: Schema.optional(Schema.NullOr(Schema.String)),
+  members_count: Schema.optional(Schema.NullOr(Schema.Finite)),
+  teams_count: Schema.optional(Schema.NullOr(Schema.Finite)),
+  created_at: Schema.String,
+  html_url: Schema.String,
+})
+const decodeEnterpriseOrgs = Schema.decodeUnknownSync(Schema.Array(EnterpriseOrgRaw))
+
+const toEnterpriseOrg = (org: typeof EnterpriseOrgRaw.Type): EnterpriseOrg => ({
+  login: org.login,
+  id: org.id,
+  description: org.description ?? '-',
+  public_repos: org.public_repos ?? 0,
+  private_repos: org.private_repos ?? 0,
+  plan: org.plan?.name ?? 'unknown',
+  billing_email: org.billing_email ?? '-',
+  members_count: org.members_count ?? 0,
+  teams_count: org.teams_count ?? 0,
+  created_at: org.created_at,
+  url: org.html_url,
+})
+
+// Created-org summary fields (lib/hubctl/enterprise.rb#create_org).
+const CreatedOrgRaw = Schema.Struct({ id: Schema.Finite, login: Schema.String, html_url: Schema.String })
+const decodeCreatedOrg = Schema.decodeUnknownSync(CreatedOrgRaw)
+
+const toCreatedOrg = (org: typeof CreatedOrgRaw.Type): CreatedOrg => ({
+  id: org.id,
+  login: org.login,
+  url: org.html_url,
+})
+
+// Build the create-org request body (lib/hubctl/enterprise.rb#create_org
+// `org_options` merge): always send `login`, include display/description/billing
+// only when supplied.
+const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unknown> => ({
+  login,
+  ...(input.displayName === undefined ? {} : { display_name: input.displayName }),
+  ...(input.description === undefined ? {} : { description: input.description }),
+  ...(input.billingEmail === undefined ? {} : { billing_email: input.billingEmail }),
+})
+
 export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('Enterprise') {
   static readonly layer: Layer.Layer<Enterprise, never, Github> = Layer.effect(
     Enterprise,
@@ -228,7 +339,44 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           Effect.withSpan('Enterprise.billing')
         )
 
-      return { billing }
+      const organizations: EnterpriseShape['organizations'] = (enterprise, input) =>
+        github
+          .paginate('GET /enterprises/{enterprise}/organizations', {
+            enterprise,
+            ...(input.perPage === undefined ? {} : { per_page: input.perPage }),
+          })
+          .pipe(
+            Effect.map(decodeEnterpriseOrgs),
+            Effect.map((orgs) => orgs.map(toEnterpriseOrg)),
+            Effect.withSpan('Enterprise.organizations')
+          )
+
+      const createOrganization: EnterpriseShape['createOrganization'] = (enterprise, login, input) =>
+        github
+          .request('POST /enterprises/{enterprise}/organizations', { enterprise, ...createOrgBody(login, input) })
+          .pipe(
+            Effect.map(decodeCreatedOrg),
+            Effect.map(toCreatedOrg),
+            Effect.withSpan('Enterprise.createOrganization')
+          )
+
+      const transferOrganization: EnterpriseShape['transferOrganization'] = (enterprise, org) =>
+        github
+          .request('POST /enterprises/{enterprise}/organizations', { enterprise, organization: org })
+          .pipe(
+            Effect.as({ enterprise, organization: org, transferred: true }),
+            Effect.withSpan('Enterprise.transferOrganization')
+          )
+
+      const removeOrganization: EnterpriseShape['removeOrganization'] = (enterprise, org) =>
+        github
+          .request('DELETE /enterprises/{enterprise}/organizations/{org}', { enterprise, org })
+          .pipe(
+            Effect.as({ enterprise, organization: org, removed: true }),
+            Effect.withSpan('Enterprise.removeOrganization')
+          )
+
+      return { billing, organizations, createOrganization, transferOrganization, removeOrganization }
     })
   )
 }

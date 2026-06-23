@@ -7,6 +7,7 @@ import type { Mode } from '../output/mode'
 import { Output } from '../output/service'
 import { Auth } from '../services/auth'
 import { Config } from '../services/config'
+import { Enterprise } from '../services/enterprise'
 import { Orgs } from '../services/orgs'
 import { Repos } from '../services/repos'
 import { Teams } from '../services/teams'
@@ -38,7 +39,7 @@ export interface AppLayerOptions {
 
 export const appLayer = (
   options: AppLayerOptions
-): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | BunServices.BunServices> => {
+): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | Enterprise | BunServices.BunServices> => {
   const github: Layer.Layer<Github> = Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
 
   return Layer.mergeAll(
@@ -48,6 +49,7 @@ export const appLayer = (
     Orgs.layer.pipe(Layer.provide(github)),
     Users.layer.pipe(Layer.provide(github)),
     Teams.layer.pipe(Layer.provide(github)),
+    Enterprise.layer.pipe(Layer.provide(github)),
     BunServices.layer
   )
 }

@@ -5,10 +5,12 @@ import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSp
 
 import { Output } from '../output/service'
 import type { Auth } from '../services/auth'
+import type { Enterprise } from '../services/enterprise'
 import type { Orgs } from '../services/orgs'
 import type { Repos } from '../services/repos'
 import type { Teams } from '../services/teams'
 import type { Users } from '../services/users'
+import { enterpriseCommand } from './enterprise'
 import { orgsCommand } from './orgs'
 import { reposCommand } from './repos'
 import { teamsCommand } from './teams'
@@ -58,9 +60,16 @@ export const rootCommand = (
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Auth | Repos | Orgs | Users | Teams | ChildProcessSpawner
+  Output | Auth | Repos | Orgs | Users | Teams | Enterprise | ChildProcessSpawner
 > => {
-  const subcommands = [versionCommand(version), reposCommand(), orgsCommand(), usersCommand(), teamsCommand()] as const
+  const subcommands = [
+    versionCommand(version),
+    reposCommand(),
+    orgsCommand(),
+    usersCommand(),
+    teamsCommand(),
+    enterpriseCommand(),
+  ] as const
   const tree: CommandTree = { commands: subcommands.map(toEntry) }
 
   return Command.make('hubctl').pipe(
