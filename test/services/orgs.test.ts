@@ -223,4 +223,76 @@ describe('Orgs service', () => {
       )
     )
   })
+
+  describe('invite', () => {
+    const invitation = { id: 7, login: 'newbie', email: null, role: 'direct_member' }
+
+    it.effect('invites by email via POST /orgs/{org}/invitations with the email body', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.invite('acme', 'person@example.com', {})
+        expect(result.invited).toBe('person@example.com')
+        expect(result.id).toBe(7)
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                    params.email === 'person@example.com' ? invitation : { ...invitation, id: -1 },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('invites by username: looks up the user id then posts invitee_id', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.invite('acme', 'newbie', {})
+        expect(result.invited).toBe('newbie')
+        expect(result.id).toBe(7)
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /users/{username}': { id: 99, login: 'newbie' },
+                  'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                    params.invitee_id === 99 ? invitation : { ...invitation, id: -1 },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('forwards role and team ids when provided', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.invite('acme', 'person@example.com', { role: 'admin', teamIds: [1, 2] })
+        expect(result.id).toBe(7)
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                    params.role === 'admin' && Array.isArray(params.team_ids) && params.team_ids.length === 2
+                      ? invitation
+                      : { ...invitation, id: -1 },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+  })
 })

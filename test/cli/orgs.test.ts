@@ -82,6 +82,7 @@ describe('orgs command', () => {
       expect(names).toContain('list')
       expect(names).toContain('show')
       expect(names).toContain('members')
+      expect(names).toContain('invite')
     })
   )
 
@@ -173,6 +174,44 @@ describe('orgs command', () => {
 
         expect(env.ok).toBe(true)
         expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+  })
+
+  describe('invite', () => {
+    const invitation = { id: 7 }
+
+    it.effect('invites by email and emits an orgs.invite envelope', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['invite', 'person@example.com', '--org', 'acme'], {
+          github: {
+            routes: {
+              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                params.email === 'person@example.com' ? invitation : { id: -1 },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.invite')
+        expect(env.result).toMatchObject({ id: 7, invited: 'person@example.com' })
+      })
+    )
+
+    it.effect('invites by username via the user-id lookup', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['invite', 'newbie', '--org', 'acme'], {
+          github: {
+            routes: {
+              'GET /users/{username}': { id: 99 },
+              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                params.invitee_id === 99 ? invitation : { id: -1 },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ id: 7, invited: 'newbie' })
       })
     )
   })
