@@ -73,10 +73,16 @@ export interface InviteInput {
   readonly teamIds?: ReadonlyArray<number>
 }
 
-// Outcome of an invitation (lib/hubctl/users.rb#invite via github_client).
+// Outcome of an invitation (lib/hubctl/users.rb#invite via github_client). The
+// Ruby surfaces the membership `role` and the `inviter` login (users.rb:85-91),
+// so we carry both; either is null when the API response omits it.
 export interface InviteResult {
   readonly id: number
   readonly invited: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly role: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly inviter: string | null
 }
 
 // Outcome of removing a member (lib/hubctl/users.rb#remove).
@@ -186,8 +192,14 @@ const listParams = (input: ListInput): Record<string, unknown> =>
 const UserId = Schema.Struct({ id: Schema.Finite })
 const decodeUserId = Schema.decodeUnknownSync(UserId)
 
-// The invitation response carries the new invitation id.
-const Invitation = Schema.Struct({ id: Schema.Finite })
+// The invitation response carries the new invitation id, the membership `role`,
+// and the `inviter` (a user object whose `login` the Ruby surfaces). `role`/
+// `inviter` are optional on the wire, so both are tolerated as absent.
+const Invitation = Schema.Struct({
+  id: Schema.Finite,
+  role: Schema.optional(Schema.NullOr(Schema.String)),
+  inviter: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+})
 const decodeInvitation = Schema.decodeUnknownSync(Invitation)
 
 // Extra invitation body fields (role/team_ids) only included when supplied,
@@ -232,7 +244,15 @@ export class Users extends Context.Service<Users, UsersShape>()('Users') {
               .pipe(Effect.map((raw) => ({ invitee_id: decodeUserId(raw).id, ...options })))
         return body.pipe(
           Effect.flatMap((payload) => github.request('POST /orgs/{org}/invitations', { org, ...payload })),
-          Effect.map((raw) => ({ id: decodeInvitation(raw).id, invited: target })),
+          Effect.map((raw) => {
+            const invitation = decodeInvitation(raw)
+            return {
+              id: invitation.id,
+              invited: target,
+              role: invitation.role ?? null,
+              inviter: invitation.inviter?.login ?? null,
+            }
+          }),
           Effect.withSpan('Users.invite')
         )
       }

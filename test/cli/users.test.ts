@@ -184,14 +184,21 @@ describe('users command', () => {
           github: {
             routes: {
               'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
-                params.email === 'new@person.com' ? { id: 99 } : { id: 0 },
+                params.email === 'new@person.com'
+                  ? { id: 99, role: 'direct_member', inviter: { login: 'admin-octo' } }
+                  : { id: 0 },
             },
           },
         })
 
         expect(env.ok).toBe(true)
         expect(env.command).toBe('users.invite')
-        expect(env.result).toMatchObject({ id: 99, invited: 'new@person.com' })
+        expect(env.result).toMatchObject({
+          id: 99,
+          invited: 'new@person.com',
+          role: 'direct_member',
+          inviter: 'admin-octo',
+        })
       })
     )
   })

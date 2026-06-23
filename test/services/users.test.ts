@@ -188,11 +188,16 @@ describe('Users service', () => {
   })
 
   describe('invite', () => {
-    it.effect('invites by email via POST /orgs/{org}/invitations', () =>
+    it.effect('invites by email via POST /orgs/{org}/invitations, surfacing role and inviter', () =>
       Effect.gen(function* () {
         const users = yield* Users
         const result = yield* users.invite('acme', 'new@person.com', {})
-        expect(result).toEqual({ id: 99, invited: 'new@person.com' })
+        expect(result).toEqual({
+          id: 99,
+          invited: 'new@person.com',
+          role: 'direct_member',
+          inviter: 'admin-octo',
+        })
       }).pipe(
         Effect.provide(
           Users.layer.pipe(
@@ -200,7 +205,9 @@ describe('Users service', () => {
               FakeGithub.layer({
                 routes: {
                   'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
-                    params.email === 'new@person.com' ? { id: 99 } : { id: 0 },
+                    params.email === 'new@person.com'
+                      ? { id: 99, role: 'direct_member', inviter: { login: 'admin-octo' } }
+                      : { id: 0 },
                 },
               })
             )
@@ -209,11 +216,11 @@ describe('Users service', () => {
       )
     )
 
-    it.effect('resolves a username to an invitee_id before inviting', () =>
+    it.effect('resolves a username to an invitee_id before inviting, surfacing role and inviter', () =>
       Effect.gen(function* () {
         const users = yield* Users
         const result = yield* users.invite('acme', 'octocat', { role: 'admin' })
-        expect(result).toEqual({ id: 99, invited: 'octocat' })
+        expect(result).toEqual({ id: 99, invited: 'octocat', role: 'admin', inviter: 'admin-octo' })
       }).pipe(
         Effect.provide(
           Users.layer.pipe(
@@ -222,11 +229,25 @@ describe('Users service', () => {
                 routes: {
                   'GET /users/{username}': { id: 1 },
                   'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
-                    params.invitee_id === 1 && params.role === 'admin' ? { id: 99 } : { id: 0 },
+                    params.invitee_id === 1 && params.role === 'admin'
+                      ? { id: 99, role: 'admin', inviter: { login: 'admin-octo' } }
+                      : { id: 0 },
                 },
               })
             )
           )
+        )
+      )
+    )
+
+    it.effect('surfaces null role/inviter when the response omits them', () =>
+      Effect.gen(function* () {
+        const users = yield* Users
+        const result = yield* users.invite('acme', 'new@person.com', {})
+        expect(result).toEqual({ id: 99, invited: 'new@person.com', role: null, inviter: null })
+      }).pipe(
+        Effect.provide(
+          Users.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'POST /orgs/{org}/invitations': { id: 99 } } })))
         )
       )
     )
