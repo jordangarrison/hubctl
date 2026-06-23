@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import { Argument, Flag } from 'effect/unstable/cli'
+import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
@@ -99,9 +99,60 @@ const addCommand = Command.make('add', { team: teamArg, user: userArg, org: orgF
   )
 )
 
+const yesFlag = Flag.boolean('yes').pipe(Flag.withDefault(false), Flag.withDescription('Skip the confirmation prompt'))
+
+// Resolve whether the removal may proceed. `--yes` short-circuits to true. In
+// json mode (agents/pipes) we NEVER prompt, so without `--yes` the answer is
+// false (the handler then fails with a re-run `fix`). In pretty/TTY mode we ask
+// interactively via `Prompt.confirm`, treating a quit as a decline.
+const confirmRemove = (
+  team: string,
+  user: string,
+  yes: boolean,
+  output: typeof Output.Service
+): Effect.Effect<boolean, never, Prompt.Environment> => {
+  if (yes) {
+    return Effect.succeed(true)
+  }
+  if (output.mode === 'json') {
+    return Effect.succeed(false)
+  }
+  return Prompt.run(
+    Prompt.confirm({ message: `Remove ${user} from team ${team}? This cannot be undone easily.` })
+  ).pipe(Effect.orElseSucceed(() => false))
+}
+
+const removeNextActions = ['hubctl teams members <team> --org <org>', 'hubctl teams list --org <org>']
+
+const removeCommand = Command.make('remove', { team: teamArg, user: userArg, org: orgFlag, yes: yesFlag }).pipe(
+  Command.withDescription('Remove a user from a team'),
+  Command.withHandler(({ org, team, user, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const teams = yield* Teams
+      const confirmed = yield* confirmRemove(team, user, yes, output)
+
+      if (confirmed) {
+        yield* emit('teams.remove', teams.remove(org, team, user), { next_actions: removeNextActions })
+        return
+      }
+
+      // Declined: in json mode surface an actionable `fix`; in pretty mode the
+      // user chose "no", so report a cancelled (non-destructive) result.
+      yield* output.mode === 'json'
+        ? output.fail('teams.remove', {
+            code: 'confirmation_required',
+            message: `Removing ${user} from team ${team} is destructive and was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('teams.remove', { team, user, removed: false, cancelled: true })
+    })
+  )
+)
+
 // Subcommand discovery for `hubctl teams` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, createCommand, membersCommand, addCommand] as const
+const subcommands = [listCommand, createCommand, membersCommand, addCommand, removeCommand] as const
 
 interface GroupEntry {
   readonly name: string

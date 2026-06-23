@@ -204,4 +204,39 @@ describe('Teams service', () => {
       )
     )
   })
+
+  describe('remove', () => {
+    it.effect('removes a user via DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.remove('acme', 'core', 'octocat')
+        expect(result).toEqual({ team: 'core', user: 'octocat', removed: true })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ routes: { 'DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}': {} } })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.remove('acme', 'core', 'ghost'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ fail: { 'DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}': 404 } })
+            )
+          )
+        )
+      )
+    )
+  })
 })

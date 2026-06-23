@@ -68,6 +68,7 @@ describe('teams command', () => {
       expect(names).toContain('create')
       expect(names).toContain('members')
       expect(names).toContain('add')
+      expect(names).toContain('remove')
     })
   )
 
@@ -194,6 +195,35 @@ describe('teams command', () => {
 
         expect(env.ok).toBe(true)
         expect(env.result).toMatchObject({ role: 'member' })
+      })
+    )
+  })
+
+  describe('remove', () => {
+    it.effect('in json mode without --yes fails with a re-run fix and does NOT call the API', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['remove', 'core', 'octocat', '--org', 'acme'], {
+          // No DELETE route registered: if the handler hit the API it would die on
+          // the missing fixture, so reaching an ok:false envelope proves it gated.
+          github: {},
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.remove')
+        expect(env.result).toBeNull()
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('in json mode with --yes removes the user', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['remove', 'core', 'octocat', '--org', 'acme', '--yes'], {
+          github: { routes: { 'DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}': {} } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.remove')
+        expect(env.result).toMatchObject({ team: 'core', user: 'octocat', removed: true })
       })
     )
   })

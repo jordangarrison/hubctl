@@ -61,11 +61,19 @@ export interface AddResult {
   readonly state: string
 }
 
+// Outcome of removing a user (lib/hubctl/teams.rb#remove_member).
+export interface RemoveResult {
+  readonly team: string
+  readonly user: string
+  readonly removed: boolean
+}
+
 export interface TeamsShape {
   readonly list: (org: string) => Effect.Effect<ReadonlyArray<TeamListItem>, GithubError>
   readonly create: (org: string, name: string, input: CreateInput) => Effect.Effect<CreatedTeam, GithubError>
   readonly members: (org: string, team: string) => Effect.Effect<ReadonlyArray<TeamMember>, GithubError>
   readonly add: (org: string, team: string, user: string, role: TeamRole) => Effect.Effect<AddResult, GithubError>
+  readonly remove: (org: string, team: string, user: string) => Effect.Effect<RemoveResult, GithubError>
 }
 
 // Raw team payload fields read by `list`. `description` is nullable on the wire;
@@ -181,7 +189,16 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
             Effect.withSpan('Teams.add')
           )
 
-      return { list, create, members, add }
+      const remove: TeamsShape['remove'] = (org, team, user) =>
+        github
+          .request('DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}', {
+            org,
+            team_slug: team,
+            username: user,
+          })
+          .pipe(Effect.as({ team, user, removed: true }), Effect.withSpan('Teams.remove'))
+
+      return { list, create, members, add, remove }
     })
   )
 }
