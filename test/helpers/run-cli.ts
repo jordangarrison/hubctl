@@ -12,6 +12,7 @@ import { Output } from '../../src/output/service'
 import { Auth } from '../../src/services/auth'
 import { Orgs } from '../../src/services/orgs'
 import { Repos } from '../../src/services/repos'
+import { Users } from '../../src/services/users'
 import { FakeGithub } from './fake-github'
 import type { FakeGithubConfig } from './fake-github'
 import { FakeSpawner } from './fake-spawner'
@@ -96,7 +97,7 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
     Input,
     ContextInput,
     E,
-    Output | Auth | Repos | Orgs | ChildProcessSpawner.ChildProcessSpawner
+    Output | Auth | Repos | Orgs | Users | ChildProcessSpawner.ChildProcessSpawner
   >,
   argv: ReadonlyArray<string>,
   options: RunCliOptions = {}
@@ -124,7 +125,8 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
       Output.layer({ mode: 'json' }),
       Auth.layer.pipe(Layer.provide(github)),
       Repos.layer.pipe(Layer.provide(github)),
-      Orgs.layer.pipe(Layer.provide(github))
+      Orgs.layer.pipe(Layer.provide(github)),
+      Users.layer.pipe(Layer.provide(github))
     )
 
     // CLI parse failures (`DuplicateOption`, `MissingArgument`, …) mean the test
