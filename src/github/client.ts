@@ -18,15 +18,30 @@ import { toGithubError } from './errors'
 // network and keeps Octokit from leaking past this boundary (design "Octokit is
 // wrapped, not exposed").
 export interface OctokitLike {
-  readonly request: (route: string, params?: Record<string, unknown>) => Promise<{ data: unknown }>
+  readonly request: (
+    route: string,
+    params?: Record<string, unknown>
+  ) => Promise<{ data: unknown; headers?: Record<string, unknown> }>
   readonly paginate: (route: string, params?: Record<string, unknown>) => Promise<ReadonlyArray<unknown>>
 }
 
 // Wrapped Github surface every domain service depends on. `request` yields the
 // response payload (`.data`); `paginate` yields every item across pages. Both
 // map any Octokit-shaped failure into the typed `GithubError` ADT.
+// A raw response surface: the decoded payload plus the response headers (lower-
+// cased by Octokit). Needed where a header carries data the body does not — e.g.
+// the `x-oauth-scopes` header on `GET /user`, which is how a token's granted
+// scopes are reported (mirrors the Ruby `scopes`).
+export interface RawResponse {
+  readonly data: unknown
+  readonly headers: Record<string, unknown>
+}
+
 export interface GithubShape {
   readonly request: (route: string, params?: Record<string, unknown>) => Effect.Effect<unknown, GithubError>
+  // Like `request`, but yields the payload AND response headers. Same typed-error
+  // mapping; used by the rare caller (Auth) that must read a response header.
+  readonly requestRaw: (route: string, params?: Record<string, unknown>) => Effect.Effect<RawResponse, GithubError>
   readonly paginate: (
     route: string,
     params?: Record<string, unknown>
@@ -66,6 +81,14 @@ const shapeFromOctokit = (octokit: OctokitLike): GithubShape => ({
         catch: toGithubError,
       }),
       (response) => response.data
+    ),
+  requestRaw: (route, params) =>
+    Effect.map(
+      Effect.tryPromise({
+        try: () => octokit.request(route, params),
+        catch: toGithubError,
+      }),
+      (response) => ({ data: response.data, headers: response.headers ?? {} })
     ),
   paginate: (route, params) =>
     Effect.tryPromise({
@@ -121,6 +144,8 @@ export const githubFromConfig: Layer.Layer<Github, never, Config> = Layer.unwrap
     const shape: GithubShape = {
       request: (route, params) =>
         octokitOnce.pipe(Effect.flatMap((octokit) => shapeFromOctokit(octokit).request(route, params))),
+      requestRaw: (route, params) =>
+        octokitOnce.pipe(Effect.flatMap((octokit) => shapeFromOctokit(octokit).requestRaw(route, params))),
       paginate: (route, params) =>
         octokitOnce.pipe(Effect.flatMap((octokit) => shapeFromOctokit(octokit).paginate(route, params))),
     }

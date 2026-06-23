@@ -39,6 +39,7 @@ describe('root command', () => {
       const tree = decodeTree(env.result)
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('version')
+      expect(names).toContain('auth')
       expect(names).toContain('repos')
       expect(names).toContain('orgs')
       expect(names).toContain('users')
@@ -48,6 +49,9 @@ describe('root command', () => {
 
       const version = tree.commands.find((c) => c.name === 'version')
       expect(version?.description.length).toBeGreaterThan(0)
+
+      const auth = tree.commands.find((c) => c.name === 'auth')
+      expect(auth?.description.length).toBeGreaterThan(0)
 
       const repos = tree.commands.find((c) => c.name === 'repos')
       expect(repos?.description.length).toBeGreaterThan(0)

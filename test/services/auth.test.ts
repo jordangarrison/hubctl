@@ -24,18 +24,39 @@ describe('Auth service', () => {
             rate: { limit: 5000, remaining: 4999, reset: 1_700_000_000, used: 1 },
           },
         },
+        headers: { 'GET /user': { 'x-oauth-scopes': 'repo, read:org, admin:org' } },
       })
     )
   )
 
-  it.effect('status returns login, name and rate limit on a good token', () =>
+  it.effect('status returns login, name, rate limit and scopes on a good token', () =>
     Effect.gen(function* () {
       const auth = yield* Auth
       const status = yield* auth.status
       expect(status.login).toBe('octocat')
       expect(status.name).toBe('The Octocat')
       expect(status.rateLimit).toEqual({ limit: 5000, remaining: 4999, reset: 1_700_000_000, used: 1 })
+      expect(status.scopes).toEqual(['repo', 'read:org', 'admin:org'])
     }).pipe(Effect.provide(goodAuth))
+  )
+
+  const noScopesAuth = Auth.layer.pipe(
+    Layer.provide(
+      FakeGithub.layer({
+        routes: {
+          'GET /user': { login: 'octocat', name: 'The Octocat' },
+          'GET /rate_limit': { rate: { limit: 5000, remaining: 4999, reset: 1_700_000_000, used: 1 } },
+        },
+      })
+    )
+  )
+
+  it.effect('status returns an empty scope list when the header is absent', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth
+      const status = yield* auth.status
+      expect(status.scopes).toEqual([])
+    }).pipe(Effect.provide(noScopesAuth))
   )
 
   const unauthorizedAuth = Auth.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /user': 401 } })))

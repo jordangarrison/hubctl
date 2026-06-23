@@ -12,6 +12,7 @@ import type { Orgs } from '../services/orgs'
 import type { Repos } from '../services/repos'
 import type { Teams } from '../services/teams'
 import type { Users } from '../services/users'
+import { authCommand } from './auth'
 import { configCommand } from './config'
 import { enterpriseCommand } from './enterprise'
 import { orgsCommand } from './orgs'
@@ -67,6 +68,7 @@ export const rootCommand = (
 > => {
   const subcommands = [
     versionCommand(version),
+    authCommand(),
     reposCommand(),
     orgsCommand(),
     usersCommand(),

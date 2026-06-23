@@ -32,6 +32,10 @@ export interface FakeGithubConfig {
   // Map of route string to a forced failure. Takes precedence over `routes`,
   // so a test can stub a normally-canned route into an error path.
   readonly fail?: Record<string, FakeFailure>
+  // Map of route string to canned response headers (lower-cased, as Octokit
+  // returns them). Surfaced by `requestRaw` — e.g. `x-oauth-scopes` on
+  // `GET /user`, which is how Auth reads a token's granted scopes.
+  readonly headers?: Record<string, Record<string, unknown>>
 }
 
 // Mirrors @octokit/request-error: a rejected request carries a numeric
@@ -57,6 +61,7 @@ const resolve = (response: FakeResponse, params: Record<string, unknown>): unkno
 const fakeOctokit = (config: FakeGithubConfig): OctokitLike => {
   const routes = config.routes ?? {}
   const fail = config.fail ?? {}
+  const headers = config.headers ?? {}
 
   // Resolve a route to its canned payload, or throw the forced/loud error.
   // Throwing inside the async bodies below lands the rejection in
@@ -75,8 +80,11 @@ const fakeOctokit = (config: FakeGithubConfig): OctokitLike => {
     )
   }
 
+  const headersFor = (route: string): Record<string, unknown> => O.getOrElse(R.get(headers, route), () => ({}))
+
   return {
-    request: (route, params) => Promise.resolve({ data: lookup('request', route, params ?? {}) }),
+    request: (route, params) =>
+      Promise.resolve({ data: lookup('request', route, params ?? {}), headers: headersFor(route) }),
     paginate: (route, params) => {
       const value = lookup('paginate', route, params ?? {})
       if (!Array.isArray(value)) {
