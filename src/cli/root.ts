@@ -1,15 +1,18 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
+import type { Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSpawner'
 
 import { Output } from '../output/service'
 import type { Auth } from '../services/auth'
+import type { Config } from '../services/config'
 import type { Enterprise } from '../services/enterprise'
 import type { Orgs } from '../services/orgs'
 import type { Repos } from '../services/repos'
 import type { Teams } from '../services/teams'
 import type { Users } from '../services/users'
+import { configCommand } from './config'
 import { enterpriseCommand } from './enterprise'
 import { orgsCommand } from './orgs'
 import { reposCommand } from './repos'
@@ -60,7 +63,7 @@ export const rootCommand = (
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Auth | Repos | Orgs | Users | Teams | Enterprise | ChildProcessSpawner
+  Output | Auth | Repos | Orgs | Users | Teams | Enterprise | Config | Prompt.Environment | ChildProcessSpawner
 > => {
   const subcommands = [
     versionCommand(version),
@@ -69,6 +72,7 @@ export const rootCommand = (
     usersCommand(),
     teamsCommand(),
     enterpriseCommand(),
+    configCommand(),
   ] as const
   const tree: CommandTree = { commands: subcommands.map(toEntry) }
 

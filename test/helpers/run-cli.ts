@@ -1,8 +1,14 @@
 import * as BunServices from '@effect/platform-bun/BunServices'
+import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
+import * as Path from 'effect/Path'
+import * as PlatformError from 'effect/PlatformError'
+import * as R from 'effect/Record'
 import * as Schema from 'effect/Schema'
+import type { Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
 
@@ -10,6 +16,7 @@ import type { Envelope } from '../../src/output/envelope'
 import { Envelope as EnvelopeSchema } from '../../src/output/envelope'
 import { Output } from '../../src/output/service'
 import { Auth } from '../../src/services/auth'
+import { Config } from '../../src/services/config'
 import { Enterprise } from '../../src/services/enterprise'
 import { Orgs } from '../../src/services/orgs'
 import { Repos } from '../../src/services/repos'
@@ -48,6 +55,53 @@ export interface RunCliOptions {
   // FakeSpawner that records each argv here (and returns exit 0) instead of
   // spawning a real process via BunServices.
   readonly spawn?: SpawnerCapture
+  // Config-service fixtures for the `config` command group. Seeds an in-memory
+  // FileSystem-backed `Config` (so tests never touch the real
+  // `~/.config/hubctl/config.json`) and lets a test read back what was written.
+  readonly config?: ConfigCapture
+}
+
+// In-memory config backing for `config` command tests. `home` controls the
+// resolved config path; `env` seeds GITHUB_TOKEN/GITHUB_ORG; `files` pre-seeds
+// the on-disk store keyed by absolute path. `store` is the live Map the test can
+// inspect after a `set`/`init` write.
+export interface ConfigCapture {
+  readonly home?: string
+  readonly env?: Record<string, string>
+  readonly files?: Record<string, string>
+  store?: Map<string, string>
+}
+
+const TEST_HOME = '/home/test-user'
+
+// Build a `Config` layer over an in-memory FileSystem so config commands run
+// without touching the real home directory. The same `store` Map is shared back
+// to the caller via `capture.store` so a test can assert on writes.
+const fakeConfigLayer = (capture: ConfigCapture): Layer.Layer<Config> => {
+  const home = capture.home ?? TEST_HOME
+  const store = capture.store ?? new Map<string, string>()
+  for (const [path, contents] of R.toEntries(capture.files ?? {})) {
+    store.set(path, contents)
+  }
+  capture.store = store
+  const fakeFs = FileSystem.layerNoop({
+    exists: (path) => Effect.succeed(store.has(path)),
+    readFileString: (path) =>
+      store.has(path)
+        ? Effect.succeed(store.get(path) ?? '')
+        : Effect.fail(
+            PlatformError.systemError({
+              _tag: 'NotFound',
+              module: 'FileSystem',
+              method: 'readFileString',
+              pathOrDescriptor: path,
+            })
+          ),
+    writeFileString: (path, data) => Effect.sync(() => store.set(path, data)),
+    makeDirectory: () => Effect.void,
+  })
+  const env = ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home, ...capture.env } }))
+  return Config.layer.pipe(Layer.provide([fakeFs, Path.layer, env]))
 }
 
 // Inert sink for every non-`log` Console method (an expression body, so it
@@ -99,7 +153,16 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
     Input,
     ContextInput,
     E,
-    Output | Auth | Repos | Orgs | Users | Teams | Enterprise | ChildProcessSpawner.ChildProcessSpawner
+    | Output
+    | Auth
+    | Repos
+    | Orgs
+    | Users
+    | Teams
+    | Enterprise
+    | Config
+    | Prompt.Environment
+    | ChildProcessSpawner.ChildProcessSpawner
   >,
   argv: ReadonlyArray<string>,
   options: RunCliOptions = {}
@@ -130,7 +193,8 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
       Orgs.layer.pipe(Layer.provide(github)),
       Users.layer.pipe(Layer.provide(github)),
       Teams.layer.pipe(Layer.provide(github)),
-      Enterprise.layer.pipe(Layer.provide(github))
+      Enterprise.layer.pipe(Layer.provide(github)),
+      fakeConfigLayer(options.config ?? {})
     )
 
     // CLI parse failures (`DuplicateOption`, `MissingArgument`, …) mean the test

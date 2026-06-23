@@ -43,7 +43,7 @@ export interface AppLayerOptions {
 
 export const appLayer = (
   options: AppLayerOptions
-): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | Enterprise | BunServices.BunServices> => {
+): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | Enterprise | Config | BunServices.BunServices> => {
   const github: Layer.Layer<Github> =
     options.github ?? Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
 
@@ -55,6 +55,7 @@ export const appLayer = (
     Users.layer.pipe(Layer.provide(github)),
     Teams.layer.pipe(Layer.provide(github)),
     Enterprise.layer.pipe(Layer.provide(github)),
+    Config.layer.pipe(Layer.provide(BunServices.layer)),
     BunServices.layer
   )
 }
