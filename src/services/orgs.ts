@@ -23,8 +23,49 @@ export interface OrgListItem {
   readonly url: string
 }
 
+// Full detail shape for `orgs show` (lib/hubctl/orgs.rb#show `org_details`).
+export interface OrgDetail {
+  readonly login: string
+  readonly id: number
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly name: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly company: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly blog: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly location: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly email: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly bio: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly description: string | null
+  readonly public_repos: number
+  readonly public_gists: number
+  readonly followers: number
+  readonly following: number
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly collaborators: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly billing_email: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly plan: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly private_gists: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly total_private_repos: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly owned_private_repos: number | null
+  readonly disk_usage: string
+  readonly created_at: string
+  readonly updated_at: string
+  readonly url: string
+}
+
 export interface OrgsShape {
   readonly list: Effect.Effect<ReadonlyArray<OrgListItem>, GithubError>
+  readonly show: (org: string) => Effect.Effect<OrgDetail, GithubError>
 }
 
 // Raw org summary fields read by `list`. `description` is nullable on the wire;
@@ -40,6 +81,62 @@ const OrgSummary = Schema.Struct({
   html_url: Schema.String,
 })
 const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(OrgSummary))
+
+// Full org payload for `show`. Many fields are nullable on the GitHub API (and
+// only present for orgs the caller administers); the detail view shows them
+// verbatim (unlike the list's '-' default).
+const OrgFull = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  name: Schema.NullOr(Schema.String),
+  company: Schema.NullOr(Schema.String),
+  blog: Schema.NullOr(Schema.String),
+  location: Schema.NullOr(Schema.String),
+  email: Schema.NullOr(Schema.String),
+  bio: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  public_repos: Schema.Finite,
+  public_gists: Schema.Finite,
+  followers: Schema.Finite,
+  following: Schema.Finite,
+  collaborators: Schema.optional(Schema.NullOr(Schema.Finite)),
+  billing_email: Schema.optional(Schema.NullOr(Schema.String)),
+  plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+  private_gists: Schema.optional(Schema.NullOr(Schema.Finite)),
+  total_private_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  owned_private_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  disk_usage: Schema.optional(Schema.NullOr(Schema.Finite)),
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  html_url: Schema.String,
+})
+const decodeFull = Schema.decodeUnknownSync(OrgFull)
+
+const toDetail = (org: typeof OrgFull.Type): OrgDetail => ({
+  login: org.login,
+  id: org.id,
+  name: org.name,
+  company: org.company,
+  blog: org.blog,
+  location: org.location,
+  email: org.email,
+  bio: org.bio,
+  description: org.description,
+  public_repos: org.public_repos,
+  public_gists: org.public_gists,
+  followers: org.followers,
+  following: org.following,
+  collaborators: org.collaborators ?? null,
+  billing_email: org.billing_email ?? null,
+  plan: org.plan?.name ?? null,
+  private_gists: org.private_gists ?? null,
+  total_private_repos: org.total_private_repos ?? null,
+  owned_private_repos: org.owned_private_repos ?? null,
+  disk_usage: `${org.disk_usage ?? 0} KB`,
+  created_at: org.created_at,
+  updated_at: org.updated_at,
+  url: org.html_url,
+})
 
 const toListItem = (org: typeof OrgSummary.Type): OrgListItem => ({
   login: org.login,
@@ -64,7 +161,12 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
         Effect.withSpan('Orgs.list')
       )
 
-      return { list }
+      const show: OrgsShape['show'] = (org) =>
+        github
+          .request('GET /orgs/{org}', { org })
+          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Orgs.show'))
+
+      return { list, show }
     })
   )
 }
