@@ -149,6 +149,24 @@ describe('compiled binary smoke', () => {
     expect(result.stdout).toContain('version')
   })
 
+  it('accepts the --json / --pretty mode flags instead of rejecting them as unknown', async () => {
+    // The mode flags are pre-scanned at the entry point and stripped before the
+    // command parser sees them; passing them must NOT trip the help screen.
+    const forcedJson = await run(['version', '--json'])
+    expect(forcedJson.status).toBe(0)
+    const env = lastEnvelope(forcedJson.stdout)
+    expect(env.ok).toBeTruthy()
+    expect(env.command).toBe('version')
+
+    // --pretty forces the human renderer even when piped (non-TTY): the output is
+    // the pretty key/value form, not JSON and not the help screen.
+    const forcedPretty = await run(['--pretty', 'version'])
+    expect(forcedPretty.status).toBe(0)
+    expect(forcedPretty.stdout).toContain('version')
+    expect(forcedPretty.stdout.trim().startsWith('{')).toBeFalsy()
+    expect(forcedPretty.stdout).not.toContain('DESCRIPTION')
+  })
+
   it('hubctl repos list against a mock GitHub emits a valid ok envelope', async () => {
     const mock = await startMockGithub()
     try {

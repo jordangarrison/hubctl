@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { appLayer } from './cli/app-layer'
-import { resolveGlobalMode, resolveGlobalNoColor } from './cli/globals'
+import { resolveGlobalMode, resolveGlobalNoColor, stripModeFlags } from './cli/globals'
 import { rootCommand } from './cli/root'
 import { VERSION } from './version'
 
@@ -12,9 +12,10 @@ import { VERSION } from './version'
 // Github + Auth + Output), and runs the root command tree over it.
 //
 // `Command.runWith(root, { version })` returns an argv-taking Effect; v4 does
-// NOT strip the `[runtime, script]` prefix, so we slice it ourselves. The root
-// command's built-in `--json`/`--pretty`/`--no-color` flags also drive the mode
-// here so the very first envelope is rendered in the right shape.
+// NOT strip the `[runtime, script]` prefix, so we slice it ourselves. The
+// `--json`/`--pretty`/`--no-color` flags are resolved here from a raw-argv
+// pre-scan (they are not registered on the parser), then stripped from the argv
+// handed to the command so the first envelope renders in the right shape.
 
 const argv = process.argv.slice(2)
 
@@ -39,4 +40,6 @@ const run = Command.runWith(rootCommand(VERSION), { version: VERSION })
 // provided once here — exactly the pattern `strictEffectProvide` recommends. The
 // diagnostic is disabled for this file via the tsconfig `overrides` entry (its
 // own guidance: "if this is an entry point, you can safely disable this").
-run(argv).pipe(Effect.provide(appLayer({ version: VERSION, mode, noColor })), BunRuntime.runMain)
+// The mode/color flags are consumed above for `mode`/`noColor`; strip them so the
+// command parser (which does not declare them) doesn't reject `--json`/`--pretty`.
+run(stripModeFlags(argv)).pipe(Effect.provide(appLayer({ version: VERSION, mode, noColor })), BunRuntime.runMain)

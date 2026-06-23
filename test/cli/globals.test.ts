@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 
-import { globalsToMode, resolveGlobalMode } from '../../src/cli/globals'
+import { globalsToMode, resolveGlobalMode, stripModeFlags } from '../../src/cli/globals'
 import type { Globals } from '../../src/cli/globals'
 
 const base: Globals = { json: false, pretty: false, color: true, yes: false }
@@ -27,6 +27,31 @@ describe('globalsToMode', () => {
   })
   it('--no-color does not override an explicit --pretty when piped', () => {
     expect(globalsToMode({ json: false, pretty: true, color: false, yes: false }, {}, false)).toBe('pretty')
+  })
+})
+
+describe('stripModeFlags', () => {
+  it('removes the mode/color flags the parser does not declare', () => {
+    expect(stripModeFlags(['--json', 'version'])).toEqual(['version'])
+    expect(stripModeFlags(['--pretty', 'repos', 'list'])).toEqual(['repos', 'list'])
+    expect(stripModeFlags(['--no-color', 'orgs', 'list'])).toEqual(['orgs', 'list'])
+  })
+  it('keeps --yes (destructive subcommands declare it) and positional args', () => {
+    expect(stripModeFlags(['repos', 'archive', 'octo/repo', '--yes', '--json'])).toEqual([
+      'repos',
+      'archive',
+      'octo/repo',
+      '--yes',
+    ])
+  })
+  it('leaves a normal invocation untouched', () => {
+    expect(stripModeFlags(['enterprise', 'billing', 'usage', '--enterprise', 'acme'])).toEqual([
+      'enterprise',
+      'billing',
+      'usage',
+      '--enterprise',
+      'acme',
+    ])
   })
 })
 

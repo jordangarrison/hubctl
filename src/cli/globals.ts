@@ -1,3 +1,4 @@
+import * as Arr from 'effect/Array'
 import { Flag } from 'effect/unstable/cli'
 
 import { resolveMode } from '../output/mode'
@@ -14,6 +15,18 @@ export const globalFlags = {
   color: Flag.boolean('color').pipe(Flag.withDefault(true), Flag.withDescription('Toggle colored output (--no-color)')),
   yes: Flag.boolean('yes').pipe(Flag.withDefault(false), Flag.withDescription('Assume "yes" for all prompts')),
 }
+
+// The mode/color global flags are resolved from a raw-argv pre-scan at the entry
+// point (resolveGlobalMode), but they are NOT registered on the command parser
+// (v4 global flags are the GlobalFlag setting/action kind, not value flags the
+// handlers consume). So they are stripped from the argv handed to the parser —
+// otherwise `hubctl --json version` trips an "unrecognized flag" help screen.
+// `--yes` is deliberately NOT stripped: destructive subcommands declare it.
+const MODE_ONLY_FLAGS: ReadonlyArray<string> = ['--json', '--pretty', '--no-color', '--color']
+
+/** Drop the entry-point-only mode/color flags from argv before command parsing. */
+export const stripModeFlags = (argv: ReadonlyArray<string>): Array<string> =>
+  argv.filter((token) => !Arr.contains(MODE_ONLY_FLAGS, token))
 
 /** The parsed global-flag record handed to command handlers. */
 export interface Globals {
