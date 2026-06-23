@@ -1,3 +1,8 @@
+# Node / Bun
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Ruby & Bundler
 vendor/bundle/
 vendor/cache/

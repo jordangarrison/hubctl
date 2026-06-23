@@ -1,0 +1,87 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "erasableSyntaxOnly": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noUncheckedSideEffectImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": false,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "types": ["bun"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "ignoreEffectErrorsInTscExitCode": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
+        "includeSuggestionsInTsc": true,
+        "diagnosticSeverity": {
+          "anyUnknownInErrorContext": "error",
+          "classSelfMismatch": "error",
+          "duplicatePackage": "error",
+          "effectFnImplicitAny": "error",
+          "floatingEffect": "error",
+          "genericEffectServices": "error",
+          "missingEffectContext": "error",
+          "missingEffectError": "error",
+          "missingLayerContext": "error",
+          "missingReturnYieldStar": "error",
+          "missingStarInYieldEffectGen": "error",
+          "nonObjectEffectServiceType": "error",
+          "outdatedApi": "error",
+          "overriddenSchemaConstructor": "error",
+          "catchUnfailableEffect": "error",
+          "effectGenUsesAdapter": "error",
+          "effectInFailure": "error",
+          "effectInVoidSuccess": "error",
+          "globalErrorInEffectCatch": "error",
+          "globalErrorInEffectFailure": "error",
+          "layerMergeAllWithDependencies": "error",
+          "leakingRequirements": "error",
+          "multipleEffectProvide": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "error",
+          "schemaSyncInEffect": "error",
+          "scopeInLayerEffect": "error",
+          "strictEffectProvide": "error",
+          "tryCatchInEffectGen": "error",
+          "unknownInEffectCatch": "error",
+          "asyncFunction": "error",
+          "cryptoRandomUUIDInEffect": "error",
+          "extendsNativeError": "error",
+          "globalConsoleInEffect": "error",
+          "globalDateInEffect": "error",
+          "globalFetchInEffect": "error",
+          "globalRandomInEffect": "error",
+          "globalTimersInEffect": "error",
+          "instanceOfSchema": "error",
+          "nodeBuiltinImport": "error",
+          "preferSchemaOverJson": "error",
+          "processEnvInEffect": "error",
+          "unsafeEffectTypeAssertion": "error",
+          "missingEffectServiceDependency": "error",
+          "serviceNotAsClass": "error",
+          "unnecessaryEffectGen": "error"
+        },
+        "overrides": [
+          {
+            "include": ["**/test/**/*.ts", "**/*.test.ts"],
+            "options": {
+              "diagnosticSeverity": { "strictEffectProvide": "off" }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

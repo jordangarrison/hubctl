@@ -1,5 +1,5 @@
 {
-  description = "hubctl - A comprehensive GitHub administration CLI with Enterprise management";
+  description = "hubctl - agent-first GitHub administration CLI (Bun + TypeScript + Effect)";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -11,86 +11,40 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # Ruby gems environment using bundlerEnv
-        gems = pkgs.bundlerEnv {
-          name = "hubctl-gems";
-          ruby = pkgs.ruby_3_3;
-          gemfile = ./Gemfile;
-          lockfile = ./Gemfile.lock;
-          gemset = ./gemset.nix;
-
-          # Override problematic gems with nixpkgs versions
-          gemConfig = pkgs.defaultGemConfig // {
-            nokogiri = attrs: {
-              buildInputs = with pkgs; [ rubyPackages_3_3.nokogiri ];
-            };
-          };
-        };
-
-        # Main package
-        hubctl = pkgs.stdenv.mkDerivation {
-          pname = "hubctl";
-          version = "0.3.1";
-          src = self;
-
-          buildInputs = [ gems pkgs.ruby_3_3 ];
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-
-          installPhase = ''
-            mkdir -p $out/bin $out/app
-            cp -r lib $out/app/
-            cp -r bin $out/app/
-
-            # Create wrapper script with proper library paths
-            makeWrapper ${pkgs.ruby_3_3}/bin/ruby $out/bin/hubctl \
-              --set GEM_HOME "${gems}/${gems.ruby.gemPath}" \
-              --set GEM_PATH "${gems}/${gems.ruby.gemPath}" \
-              --prefix LD_LIBRARY_PATH : "${pkgs.ruby_3_3}/lib" \
-              --add-flags "-I$out/app/lib" \
-              --add-flags "$out/app/bin/hubctl"
-          '';
-        };
-
+        # Toolchain provided by Nix. Bun is the runtime / package manager and
+        # drives the project scripts; Node is kept on PATH because a few dev
+        # tools still shell out to a Node resolver. The rest of the toolchain
+        # (oxlint, oxfmt, tsgo, vitest, ast-grep, fallow, commitlint) is pinned
+        # in package.json and installed by `bun install` rather than Nix, so the
+        # exact versions match CI.
+        devTools = with pkgs; [
+          bun
+          nodejs_22
+          git
+          # ast-grep ships a generic glibc binary via npm that NixOS can't run
+          # (the dynamic-linker stub issue), so provide it from nixpkgs instead.
+          # The package.json `ast-grep`/`ast-grep:test` scripts resolve this one
+          # off PATH since @ast-grep/cli is intentionally not an npm dep.
+          ast-grep
+        ];
       in
       {
-        packages.default = hubctl;
-        packages.hubctl = hubctl;
-
-        # Development shell with all Ruby dependencies
+        # The compiled-binary package derivation is added in the cutover phase
+        # (Phase 10), once src/ exists. Until then this flake provides the dev
+        # shell only.
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            ruby
-            bundler
-            # Native extension build dependencies
-            gcc
-            pkg-config
-            libxml2
-            libxslt
-            libyaml
-            openssl
-            zlib
-            gnumake
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # macOS-specific dependencies
-            clang
-          ];
+          buildInputs = devTools;
 
           shellHook = ''
-            echo "🚀 hubctl development environment"
-            echo "Ruby: $(ruby --version)"
-            echo "Bundler: $(bundle --version)"
+            echo "🚀 hubctl dev environment (Bun + TypeScript + Effect)"
+            echo "Bun:  $(bun --version)"
+            echo "Node: $(node --version)"
             echo ""
             echo "Quick start:"
-            echo "  bundle install    # Install gems"
-            echo "  ./bin/hubctl --help    # Test CLI directly"
-            echo "  nix run . -- --help   # Test via Nix"
+            echo "  bun install        # install the toolchain + deps"
+            echo "  bun run validate   # format + lint + typecheck + test + ast-grep"
+            echo "  bun run dev -- --help"
           '';
-        };
-
-        # App runner
-        apps.default = {
-          type = "app";
-          program = "${hubctl}/bin/hubctl";
         };
       }
     );
