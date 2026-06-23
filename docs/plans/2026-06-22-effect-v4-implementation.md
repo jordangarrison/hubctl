@@ -12,153 +12,73 @@
 
 ---
 
+## Status
+
+> **Updated 2026-06-22.** Phase 0 (flake + validation tooling) is **DONE** and
+> committed — this was pulled to the front per the "flake + dev tooling for
+> validation first" feedback. The Effect v4 CLI API was verified against the
+> installed beta and **differs from the v3-shaped snippets that were originally
+> drafted below**; the corrected API lives in `docs/effect-v4-api-notes.md` and
+> the snippets in Phases 4–8 have been reconciled to it. Phases 1–10 remain to
+> be executed.
+
+**Completed (commits `f831357`, `cb23869`):**
+- `flake.nix` → Bun + Node + git + (nixpkgs) `ast-grep` + (autoPatchelf) `fallow` devShell; Ruby gem build dropped.
+- `package.json` scripts + deps (`effect@4.0.0-beta.86`, Octokit + plugins, tsgo, oxlint/oxfmt/ultracite, vitest+`@effect/vitest`, ast-grep, commitlint, hooks).
+- Configs: `tsconfig{,.base}.json` (tsgo + `@effect/language-service`, all diagnostics `error`), `oxlint.config.mjs`, `oxfmt.config.mjs`, `sgconfig.yml` + `rules/`/`rule-tests/`, `commitlint.config.js`, `.nano-staged.mjs`, `vitest.{base,config,e2e.config}.ts`.
+- `docs/effect-v4-api-notes.md` — verified v4 CLI API.
+- `bun run validate` (format → lint → typecheck → test → ast-grep) is **green**.
+
+**Carried-forward deltas to apply during execution:**
+- **CLI API:** v4 renamed **`Options` → `Flag`** and **`Args` → `Argument`**; the
+  entrypoint is **`Command.runWith(cmd, { version })(process.argv.slice(2))`**
+  provided **`BunServices.layer`** (not `Command.run(...)(process.argv)` /
+  `BunContext.layer`). Use `Flag.string` (no `Flag.text`) and `Argument.variadic`
+  (no `Args.repeated`). See `docs/effect-v4-api-notes.md`.
+- **NixOS native binaries:** `ast-grep` (nixpkgs) and `fallow` (autoPatchelf flake
+  derivation) come from the flake, not npm — run all tooling inside `nix develop`.
+- **`fallow` leg:** kept out of the default `validate` until real source exists
+  (on a bare scaffold it false-flags tooling-only devDeps `@effect/vitest` +
+  `nano-staged`). Re-add to `validate` (or add a `fallow.toml` allowlist) once
+  `src/` services import `@effect/vitest`.
+- **Layer-boundaries oxlint plugin:** deferred to Phase 5 (needs `src/{cli,services,github,output}` to exist to be meaningful).
+- **Git hooks** don't auto-install in a worktree (`.git` is a file); `prepare` is
+  non-fatal. They install normally at a regular checkout root post-merge.
+
+---
+
 ## How to use this plan
 
 - **TDD throughout.** Every behavior: write the failing test → run it red → minimal implementation → run it green → commit. Use `superpowers:test-driven-development`.
 - **Frequent commits.** One logical change per commit; conventional-commit messages (commitlint enforces this).
 - **Per Jordan's global instructions:** do **not** add Claude as co-author or "Generated with Claude Code" to commit messages.
-- **v4-beta caveat.** Effect v4 is beta; `effect/unstable/cli` APIs may differ from the v3-shaped snippets below. **Phase 0 records the *actual* installed API into `docs/effect-v4-api-notes.md`; reconcile every later snippet against it.** The `@effect/language-service` `outdatedApi: error` diagnostic will fail typecheck on stale APIs — treat that as the source of truth.
+- **v4 API is verified — trust `docs/effect-v4-api-notes.md` over any snippet here.** Phase 0 recorded the real installed API (`effect@4.0.0-beta.86`): `Flag`/`Argument`/`Command.runWith`/`BunServices.layer`. The `@effect/language-service` `outdatedApi: error` diagnostic fails typecheck on stale APIs — treat that as the source of truth, and re-verify if the beta bumps.
 - **Run commands from the worktree root:** `/home/jordangarrison/dev/jordangarrison/.worktrees/hubctl/effect-v4`.
 
 ---
 
-## Phase 0 — Toolchain scaffold & v4 API verification (spike)
+## Phase 0 — Toolchain scaffold & v4 API verification — ✅ DONE
 
-Goal: a buildable, lintable, type-checkable empty Bun/Effect project, and a written record of the real v4 CLI API so later phases use correct imports.
+Completed and committed (`f831357`, `cb23869`). Outcome captured in the Status
+section above and in `docs/effect-v4-api-notes.md`. Highlights of what was built
+and what diverged from the original draft:
 
-### Task 0.1: Initialize Bun project
+- **Flake-first:** `flake.nix` is now a Bun devShell (Bun + Node 22 + git +
+  nixpkgs `ast-grep` + autoPatchelf `fallow`); the Ruby gem build/devShell is gone.
+- **Deps pinned:** `effect@4.0.0-beta.86` + matching `@effect/platform-bun`,
+  Octokit core + paginate/throttling/retry, and the full dev toolchain.
+- **v4 API verified via a throwaway spike**, then recorded:
+  `Flag`/`Argument` (not `Options`/`Args`), `Command.make().pipe(withDescription,
+  withHandler, withSubcommands)`, `Command.runWith(cmd, { version })(argv.slice(2))`,
+  `BunServices.layer` + `BunRuntime.runMain`. Built-in `--help/--version/
+  --completions/--log-level` come free.
+- **NixOS:** `ast-grep` and `fallow` npm binaries can't run on NixOS; both now come
+  from the flake (nixpkgs / autoPatchelf). Run tooling inside `nix develop`.
+- **`bun run validate` is green** (format → lint → typecheck → test → ast-grep).
 
-**Files:** Create `package.json`, `bunfig.toml`, `.gitignore` (append)
-
-**Step 1:** `bun init -y` then replace `package.json` with the scaffold below (adjust versions to the latest matching beta at install time — see Task 0.2).
-
-```json
-{
-  "name": "hubctl",
-  "version": "0.4.0",
-  "type": "module",
-  "bin": { "hubctl": "bin/hubctl" },
-  "scripts": {
-    "dev": "bun run src/main.ts",
-    "typecheck": "tsgo --noEmit",
-    "lint": "oxlint --config oxlint.config.mjs --report-unused-disable-directives-severity=error src/ test/ scripts/",
-    "lint:fix": "oxlint --config oxlint.config.mjs --report-unused-disable-directives-severity=error --fix src/ test/ scripts/",
-    "format": "oxfmt --config oxfmt.config.mjs --check src/ test/ scripts/",
-    "format:fix": "oxfmt --config oxfmt.config.mjs src/ test/ scripts/",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "ast-grep": "ast-grep scan",
-    "ast-grep:test": "ast-grep test",
-    "fallow": "fallow audit --quiet",
-    "build": "bun run scripts/compile.ts bun-linux-x64 dist/hubctl-linux-x64 && bun run scripts/compile.ts bun-darwin-arm64 dist/hubctl-darwin-arm64",
-    "build:local": "bun build --compile --outfile dist/hubctl src/main.ts",
-    "validate": "bun run format && bun run lint && bun run typecheck && bun run test && bun run ast-grep && bun run fallow",
-    "repl": "bun repl --preload ./scripts/repl.ts",
-    "postinstall": "effect-language-service patch && effect-tsgo patch",
-    "prepare": "simple-git-hooks"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "bunx nano-staged",
-    "pre-push": "bun run validate",
-    "commit-msg": "bunx commitlint --edit"
-  }
-}
-```
-
-**Step 2:** Append to `.gitignore`: `node_modules/`, `dist/`, `*.tsbuildinfo`.
-
-**Step 3:** Commit: `chore: scaffold bun project`
-
-### Task 0.2: Install dependencies (pin the matching beta)
-
-**Step 1:** Install runtime + dev deps. Use `effect@beta` and let Bun resolve the current beta, then **pin the exact resolved versions** (match `@effect/*` to the same beta number, as floai does):
-
-```bash
-bun add effect@beta @effect/platform-bun@beta
-bun add @octokit/core @octokit/plugin-paginate-rest @octokit/plugin-throttling @octokit/plugin-retry @octokit/types
-bun add -d @effect/vitest@beta vitest @types/bun typescript @typescript/native-preview @effect/tsgo @effect/language-service
-bun add -d oxlint ultracite oxfmt @mpsuesser/oxlint-plugin-effect eslint-plugin-boundaries eslint-import-resolver-typescript
-bun add -d @ast-grep/cli fallow simple-git-hooks nano-staged @commitlint/cli @commitlint/config-conventional
-```
-
-**Step 2:** Add an `overrides` block pinning `effect` to the exact resolved beta (prevents duplicate-effect drift the language-service flags as `duplicatePackage: error`).
-
-**Step 3:** Commit: `chore: add dependencies`
-
-### Task 0.3: Verify the real Effect v4 CLI + platform API
-
-**Files:** Create `docs/effect-v4-api-notes.md`, `scripts/spike-cli.ts` (temporary)
-
-**Step 1:** Write a tiny spike CLI exercising the surface later phases depend on, then run it and record what actually compiles/runs:
-
-```ts
-// scripts/spike-cli.ts — verify imports against installed beta, then delete
-import { Command, Options, Args } from "effect/unstable/cli"   // VERIFY path
-import { BunRuntime, BunContext } from "@effect/platform-bun"   // VERIFY names
-import { Console, Effect } from "effect"
-
-const name = Args.text({ name: "name" })
-const loud = Options.boolean("loud")
-const hello = Command.make("hello", { name, loud }, ({ name, loud }) =>
-  Console.log(loud ? `HELLO ${name}!` : `hello ${name}`)
-)
-const cli = Command.run(hello, { name: "spike", version: "0.0.0" })
-cli(process.argv).pipe(Effect.provide(BunContext.layer), BunRuntime.runMain)
-```
-
-**Step 2:** Run `bun run scripts/spike-cli.ts world --loud`. Fix imports until it prints `HELLO world!`. Record in `docs/effect-v4-api-notes.md`: the exact import paths, the `Options`/`Args` constructor names (`text`, `boolean`, `choice`, `integer`, `optional`, `repeated`, `withAlias`), `Command.make`/`withSubcommands`/`run` signatures, the Bun runtime entrypoint, and the `Effect.Service` class form. Note any divergence from this plan's snippets.
-
-**Step 3:** Verify `Prompt` (interactive confirm) and NDJSON-friendly `Console`/stdout writing exist; record their APIs. Verify `Schema` location (`effect` core vs `effect/unstable`).
-
-**Step 4:** Delete `scripts/spike-cli.ts`. Commit: `docs: record verified Effect v4 API surface`
-
-### Task 0.4: TypeScript config (tsgo + language-service)
-
-**Files:** Create `tsconfig.base.json`, `tsconfig.json`
-
-**Step 1:** Copy floai's `tsconfig.base.json` (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `erasableSyntaxOnly`, `isolatedModules`, `verbatimModuleSyntax`, `moduleDetection: force`, `moduleResolution: bundler`, `types: ["bun"]`, and the full `@effect/language-service` plugin block with all `diagnosticSeverity` at `error`, plus the test-override turning off `strictEffectProvide`). Remove monorepo-specific `allowedDuplicatedPackages` only if a single `effect` install makes it irrelevant.
-
-**Step 2:** `tsconfig.json` extends base, `include: ["src", "test", "scripts"]`.
-
-**Step 3:** `bun run typecheck` → expect PASS (empty project). Commit: `chore: add tsconfig with tsgo + effect language-service`
-
-### Task 0.5: Lint, format, structural-rule configs
-
-**Files:** Create `oxlint.config.mjs`, `oxfmt.config.mjs`, `sgconfig.yml`, `commitlint.config.js`, `.nano-staged.mjs`, `rules/` + `rule-tests/` dirs
-
-**Step 1:** `oxlint.config.mjs` — adapt floai's: `extends: [core, vitest]` from ultracite, `jsPlugins` for `@mpsuesser/oxlint-plugin-effect` and `eslint-plugin-boundaries`, spread `effect.configs.recommended.rules`. Replace floai's workspace `boundaries/elements` with **path-mode** elements for our layers:
-
-```js
-'boundaries/elements': [
-  { type: 'cli',      pattern: 'src/cli/**',      mode: 'full' },
-  { type: 'output',   pattern: 'src/output/**',   mode: 'full' },
-  { type: 'services', pattern: 'src/services/**', mode: 'full' },
-  { type: 'github',   pattern: 'src/github/**',   mode: 'full' },
-  { type: 'schema',   pattern: 'src/schema/**',   mode: 'full' },
-],
-```
-with a `boundaries/dependencies` rule: `cli` may import `services`/`output`/`schema` but **not** `github` or `@octokit/*`; `services` may import `github`/`schema` but not `cli`; only `github` may import `@octokit/*`.
-
-**Step 2:** `oxfmt.config.mjs` — ultracite preset, `printWidth: 120`, `semi: false`, `singleQuote: true`.
-
-**Step 3:** `commitlint.config.js` — `extends: ['@commitlint/config-conventional']`.
-
-**Step 4:** `.nano-staged.mjs` — on staged `*.{ts,mjs,js}`: run `oxfmt` then `oxlint --fix`.
-
-**Step 5:** `sgconfig.yml` — `ruleDirs: [rules/shared, rules/effect, rules/cli]`, `testConfigs` pointing at `rule-tests/*`, `languageGlobs: { tsx: ["*.ts"] }`. Create empty rule dirs with a `.gitkeep`.
-
-**Step 6:** `bun run format`, `bun run lint`, `bun run ast-grep` → all PASS (no source yet). Commit: `chore: add oxlint, oxfmt, ast-grep, commitlint configs`
-
-### Task 0.6: Git hooks
-
-**Step 1:** `bunx simple-git-hooks` to install hooks. Verify `.git/hooks/pre-commit` exists.
-
-**Step 2:** Commit: `chore: wire git hooks` (this commit also smoke-tests commitlint + nano-staged).
-
-**Phase 0 checkpoint:** `bun run validate` passes on an empty project. The real v4 API is recorded.
-
----
+> The original detailed Task 0.1–0.6 breakdown has been executed; it is preserved
+> in git history (see the commits above). Nothing further is needed in Phase 0.
+> Begin execution at **Phase 1**.
 
 ## Phase 1 — Output envelope & mode resolution
 
@@ -303,7 +223,7 @@ it("interactive TTY defaults to pretty", () => expect(resolveMode({ json: false,
 
 **Files:** Create `src/cli/globals.ts`, Test `test/cli/globals.test.ts`
 
-**Step 1 (failing test):** Parsing `--json`/`--pretty`/`--no-color`/`--yes` yields the expected option record, and feeding it through `resolveMode` (Task 1.2) gives the right mode. **Step 2:** FAIL → **Step 3:** define the four global `Options`; a helper that maps parsed globals + `process.stdout.isTTY` + env into the `Output` mode reference. **Step 4:** PASS → **Step 5:** Commit: `feat(cli): global options and mode wiring`
+**Step 1 (failing test):** Parsing `--json`/`--pretty`/`--no-color`/`--yes` yields the expected option record, and feeding it through `resolveMode` (Task 1.2) gives the right mode. **Step 2:** FAIL → **Step 3:** define the four global flags via `Flag`/`GlobalFlag`; a helper that maps parsed globals + `process.stdout.isTTY` + env into the `Output` mode reference. **Step 4:** PASS → **Step 5:** Commit: `feat(cli): global options and mode wiring`
 
 ### Task 4.2: Root command (command-tree discovery) + version
 
@@ -315,7 +235,7 @@ it("interactive TTY defaults to pretty", () => expect(resolveMode({ json: false,
 
 **Files:** Create `src/main.ts`, `bin/hubctl`
 
-**Step 1:** `src/main.ts` builds the full `AppLayer` (`BunContext.layer` + `Github` + `Config` + `Auth` + `Output`), `Command.run(root, { name, version })`, `cli(process.argv).pipe(Effect.provide(AppLayer), BunRuntime.runMain)`. `bin/hubctl` is a shebang shim (`#!/usr/bin/env bun` running the compiled/dev entry).
+**Step 1:** `src/main.ts` builds the full `AppLayer` (`BunServices.layer` + `Github` + `Config` + `Auth` + `Output`), then `const run = Command.runWith(root, { version: VERSION })` and `run(process.argv.slice(2)).pipe(Effect.provide(AppLayer), BunRuntime.runMain)`. `bin/hubctl` is a shebang shim (`#!/usr/bin/env bun` running the compiled/dev entry). See `docs/effect-v4-api-notes.md`.
 
 **Step 2:** `bun run dev -- version` prints a valid JSON envelope (piped → json mode). Manual check; then a smoke assertion is added in Phase 8.
 
@@ -341,19 +261,19 @@ For **each subcommand** (`list`, `show`, `create`, `clone`, `archive`, `topics`)
 
 1. **Service test (red):** in `test/services/repos.test.ts`, over `FakeGithub`, assert the domain method returns the transformed value / maps errors (mirror the Ruby data shaping in `lib/hubctl/repos.rb`).
 2. **Service impl (green):** add the method to `src/services/repos.ts` (`Effect.Service`) using `Github.request`/`paginate`.
-3. **Command test (red):** in `test/cli/repos.test.ts`, run the command via `Command.run` over `FakeGithub` + captured stdout; assert the **envelope** (ok, `command: "repos.list"`, `result` shape, `next_actions`).
-4. **Command impl (green):** add the thin handler in `src/cli/repos.ts` — parse `Options`/`Args`, call the service, hand to `Output.ok(...)` with `next_actions`.
+3. **Command test (red):** in `test/cli/repos.test.ts`, run the command via `Command.runWith(cmd, { version })(argv)` over `FakeGithub` + captured stdout; assert the **envelope** (ok, `command: "repos.list"`, `result` shape, `next_actions`).
+4. **Command impl (green):** add the thin handler in `src/cli/repos.ts` — parse `Flag`/`Argument`, call the service, hand to `Output.ok(...)` with `next_actions`.
 5. **Commit** per subcommand: `feat(repos): <subcommand>`.
 
 **Files:** Create `src/services/repos.ts`, `src/cli/repos.ts`, `test/services/repos.test.ts`, `test/cli/repos.test.ts`
 
 **Option/Arg mapping (from `lib/hubctl/repos.rb`):**
-- `list`: `--org` (`Options.text.optional`), `--type` (`Options.choice([all,public,private,forks,sources,member])`), `--sort` (`choice`), `--direction` (`choice`). `next_actions: ["hubctl repos show <repo>", "hubctl repos archive <repo> --yes"]`.
-- `show <repo>`: `Args.text({name:"repo"})`. `next_actions` for clone/topics.
+- `list`: `--org` (`Flag.string("org").pipe(Flag.optional)`), `--type` (`Flag.choice("type", ["all","public","private","forks","sources","member"])`), `--sort` (`Flag.choice`), `--direction` (`Flag.choice`). `next_actions: ["hubctl repos show <repo>", "hubctl repos archive <repo> --yes"]`.
+- `show <repo>`: `Argument.string("repo")`. `next_actions` for clone/topics.
 - `create <name>`: `--org`, `--description`, `--private` (`boolean`), `--init` (`boolean`, default true), `--gitignore`, `--license`.
 - `clone <repo>`: `--path`, `--depth` (`integer.optional`); shells out via the platform `Command`/process (not raw `system`). In JSON mode, return the resolved clone command + result; do not stream git output into the envelope.
 - `archive <repo>`: destructive → confirmation gate: pretty/TTY uses `Prompt`; JSON requires `--yes` else `Output.fail` with fix "re-run with --yes". (Write a test for **both** branches.)
-- `topics <repo>`: `--add`/`--remove`/`--set` (`Options.text.repeated.optional`); list vs modify branches.
+- `topics <repo>`: `--add`/`--remove`/`--set`. ⚠️ v4 `Flag` has no `repeated`/`variadic` — verify the repeated-flag mechanism against `docs/effect-v4-api-notes.md` (likely a comma-split `Flag.string(...).pipe(Flag.optional, Flag.map(splitCsv))`, or model the values as a trailing `Argument.variadic`); list vs modify branches.
 
 **Wire** `repos` into `root` via `withSubcommands`. Add a command-level test that `hubctl repos` (no subcommand) lists its subcommands.
 
@@ -398,7 +318,7 @@ Largest surface; preserve every endpoint in `github_client.rb`. **First** port t
 **Files:** Modify `src/output/service.ts`, Test `test/output/stream.test.ts`. `Output.stream(command, events$)` writes one JSON object per line per event with a `type` discriminator, **last line = standard envelope**. Wire `enterprise audit-log` to it. TDD. Commit: `feat(output): NDJSON streaming with terminal envelope`.
 
 ### Task 8.2: In-process runtime envelope tests
-**Files:** `test/runtime/in-process.test.ts`. Drive the real `Command.run` (full `AppLayer` but `Github` swapped to `FakeGithub`) for representative commands across all groups; assert stdout is **Schema-valid** envelope JSON, correct exit-code intent, and that a forced-error path yields `ok:false` + `fix`. Commit: `test(runtime): in-process envelope coverage`.
+**Files:** `test/runtime/in-process.test.ts`. Drive the real `Command.runWith` entrypoint (full `AppLayer` but `Github` swapped to `FakeGithub`) for representative commands across all groups; assert stdout is **Schema-valid** envelope JSON, correct exit-code intent, and that a forced-error path yields `ok:false` + `fix`. Commit: `test(runtime): in-process envelope coverage`.
 
 ### Task 8.3: Compiled-binary smoke e2e
 **Files:** `vitest.e2e.config.ts` (include `test/e2e/**`, 30s timeouts), `test/e2e/smoke.test.ts`, `vitest.base.ts` (shared `pool: threads`), `vitest.config.ts` (exclude `test/e2e/**`). The e2e suite runs `bun run build:local` first (or asserts the binary exists), then spawns `dist/hubctl` via the platform `Command`/`child_process`:
