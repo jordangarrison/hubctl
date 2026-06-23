@@ -9,6 +9,7 @@ import { Auth } from '../services/auth'
 import { Config } from '../services/config'
 import { Orgs } from '../services/orgs'
 import { Repos } from '../services/repos'
+import { Teams } from '../services/teams'
 import { Users } from '../services/users'
 
 // The production application layer behind `src/main.ts`. It resolves the full
@@ -37,7 +38,7 @@ export interface AppLayerOptions {
 
 export const appLayer = (
   options: AppLayerOptions
-): Layer.Layer<Output | Auth | Repos | Orgs | Users | BunServices.BunServices> => {
+): Layer.Layer<Output | Auth | Repos | Orgs | Users | Teams | BunServices.BunServices> => {
   const github: Layer.Layer<Github> = Layer.provide(githubFromConfig, Layer.provide(Config.layer, BunServices.layer))
 
   return Layer.mergeAll(
@@ -46,6 +47,7 @@ export const appLayer = (
     Repos.layer.pipe(Layer.provide(github)),
     Orgs.layer.pipe(Layer.provide(github)),
     Users.layer.pipe(Layer.provide(github)),
+    Teams.layer.pipe(Layer.provide(github)),
     BunServices.layer
   )
 }

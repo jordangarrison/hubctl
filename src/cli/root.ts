@@ -7,9 +7,11 @@ import { Output } from '../output/service'
 import type { Auth } from '../services/auth'
 import type { Orgs } from '../services/orgs'
 import type { Repos } from '../services/repos'
+import type { Teams } from '../services/teams'
 import type { Users } from '../services/users'
 import { orgsCommand } from './orgs'
 import { reposCommand } from './repos'
+import { teamsCommand } from './teams'
 import { usersCommand } from './users'
 import { versionCommand } from './version'
 
@@ -56,9 +58,9 @@ export const rootCommand = (
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Auth | Repos | Orgs | Users | ChildProcessSpawner
+  Output | Auth | Repos | Orgs | Users | Teams | ChildProcessSpawner
 > => {
-  const subcommands = [versionCommand(version), reposCommand(), orgsCommand(), usersCommand()] as const
+  const subcommands = [versionCommand(version), reposCommand(), orgsCommand(), usersCommand(), teamsCommand()] as const
   const tree: CommandTree = { commands: subcommands.map(toEntry) }
 
   return Command.make('hubctl').pipe(

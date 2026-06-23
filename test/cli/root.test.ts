@@ -42,6 +42,7 @@ describe('root command', () => {
       expect(names).toContain('repos')
       expect(names).toContain('orgs')
       expect(names).toContain('users')
+      expect(names).toContain('teams')
 
       const version = tree.commands.find((c) => c.name === 'version')
       expect(version?.description.length).toBeGreaterThan(0)
@@ -54,6 +55,9 @@ describe('root command', () => {
 
       const users = tree.commands.find((c) => c.name === 'users')
       expect(users?.description.length).toBeGreaterThan(0)
+
+      const teams = tree.commands.find((c) => c.name === 'teams')
+      expect(teams?.description.length).toBeGreaterThan(0)
     })
   )
 
