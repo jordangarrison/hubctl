@@ -271,4 +271,19 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('licenses', () => {
+    it.effect('emits the raw consumed-licenses payload', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['licenses', 'acme'], {
+          github: {
+            routes: { 'GET /enterprises/{enterprise}/consumed-licenses': { total_seats_consumed: 5 } },
+          },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.licenses')
+        expect(env.result).toMatchObject({ total_seats_consumed: 5 })
+      })
+    )
+  })
 })

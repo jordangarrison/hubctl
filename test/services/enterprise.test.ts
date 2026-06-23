@@ -296,4 +296,30 @@ describe('Enterprise service', () => {
       )
     )
   })
+
+  describe('consumedLicenses', () => {
+    it.effect('returns the raw consumed-licenses payload', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.consumedLicenses(enterprise)
+        expect(result).toEqual({
+          total_seats_consumed: 5,
+          total_seats_purchased: 10,
+          users: [{ github_com_login: 'alice' }],
+        })
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              'GET /enterprises/{enterprise}/consumed-licenses': {
+                total_seats_consumed: 5,
+                total_seats_purchased: 10,
+                users: [{ github_com_login: 'alice' }],
+              },
+            },
+          })
+        )
+      )
+    )
+  })
 })

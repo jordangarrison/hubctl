@@ -383,9 +383,24 @@ const billingCommand = Command.make('billing').pipe(
   Command.withSubcommands(billingSubcommands)
 )
 
+// === licenses ===
+
+const licensesCommand = Command.make('licenses', { enterprise: enterpriseArg }).pipe(
+  Command.withDescription('Show enterprise consumed licenses'),
+  Command.withHandler(({ enterprise }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) =>
+        emit('enterprise.licenses', ent.consumedLicenses(enterprise), {
+          next_actions: ['hubctl enterprise members <enterprise>'],
+        })
+      )
+    )
+  )
+)
+
 // === group discovery ===
 
-const subcommands = [orgsCommand, membersCommand, ownersCommand, billingCommand] as const
+const subcommands = [orgsCommand, membersCommand, ownersCommand, billingCommand, licensesCommand] as const
 
 export const enterpriseCommand = (): Command.Command<
   'enterprise',
