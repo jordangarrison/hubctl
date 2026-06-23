@@ -2,7 +2,9 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
+import type { PlatformError } from 'effect/PlatformError'
 import * as Schema from 'effect/Schema'
+import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
@@ -78,10 +80,32 @@ export interface CreatedRepo {
   readonly html_url: string
 }
 
+export interface CloneInput {
+  readonly path?: string
+  readonly depth?: number
+}
+
+// Outcome of a clone: the resolved git invocation (a single string for agents),
+// the clone URL, where it landed, and git's exit code. The raw git output is
+// intentionally NOT captured into the envelope (design "do not stream git output
+// into the envelope").
+export interface CloneResult {
+  readonly command: string
+  readonly clone_url: string
+  readonly target_path: string
+  readonly exit_code: number
+}
+
 export interface ReposShape {
   readonly list: (input: ListInput) => Effect.Effect<ReadonlyArray<RepoListItem>, GithubError>
   readonly show: (repo: string) => Effect.Effect<RepoDetail, GithubError>
   readonly create: (name: string, input: CreateInput) => Effect.Effect<CreatedRepo, GithubError>
+  // `clone` shells out to git, so it additionally requires the platform
+  // `ChildProcessSpawner` and can fail with a `PlatformError` if the spawn fails.
+  readonly clone: (
+    repo: string,
+    input: CloneInput
+  ) => Effect.Effect<CloneResult, GithubError | PlatformError, ChildProcessSpawner.ChildProcessSpawner>
 }
 
 // Raw repo payload fields we read. `description`/`language` are nullable on the
@@ -140,6 +164,27 @@ const RepoCreated = Schema.Struct({
 })
 
 const decodeCreated = Schema.decodeUnknownSync(RepoCreated)
+
+// Just the `clone_url` the `clone` flow needs from the repo payload.
+const RepoCloneUrl = Schema.Struct({ clone_url: Schema.String })
+const decodeCloneUrl = Schema.decodeUnknownSync(RepoCloneUrl)
+
+// Basename of an "owner/name(.git)" repo argument, dropping any trailing `.git`
+// — mirrors the Ruby `File.basename(repo, '.git')` default clone target.
+const basename = (repo: string): string => {
+  const slash = repo.lastIndexOf('/')
+  const tail = slash === -1 ? repo : repo.slice(slash + 1)
+  return tail.endsWith('.git') ? tail.slice(0, -'.git'.length) : tail
+}
+
+// Build the `git clone` argv (mirrors the Ruby clone_cmd assembly): an optional
+// `--depth N`, the clone URL, and an optional explicit target path.
+const cloneArgs = (cloneUrl: string, input: CloneInput): ReadonlyArray<string> => [
+  'clone',
+  ...(input.depth === undefined ? [] : ['--depth', String(input.depth)]),
+  cloneUrl,
+  ...(input.path === undefined ? [] : [input.path]),
+]
 
 // Build the create-repo request body, mirroring the Ruby `create_options`
 // assembly: always send `description`/`private`/`auto_init`, and only include
@@ -233,7 +278,26 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
         return effect.pipe(Effect.map(decodeCreated), Effect.withSpan('Repos.create'))
       }
 
-      return { list, show, create }
+      const clone: ReposShape['clone'] = (repo, input) =>
+        github.request('GET /repos/{owner}/{repo}', splitRepo(repo)).pipe(
+          Effect.map(decodeCloneUrl),
+          Effect.flatMap((detail) => {
+            const args = cloneArgs(detail.clone_url, input)
+            const targetPath = input.path ?? basename(repo)
+            return ChildProcessSpawner.ChildProcessSpawner.pipe(
+              Effect.flatMap((spawner) => spawner.exitCode(ChildProcess.make('git', args))),
+              Effect.map((exitCode) => ({
+                command: `git ${args.join(' ')}`,
+                clone_url: detail.clone_url,
+                target_path: targetPath,
+                exit_code: Number(exitCode),
+              }))
+            )
+          }),
+          Effect.withSpan('Repos.clone')
+        )
+
+      return { list, show, create, clone }
     })
   )
 }

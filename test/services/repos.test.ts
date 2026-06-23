@@ -8,6 +8,8 @@ import * as O from 'effect/Option'
 import { NotFoundError } from '../../src/github/errors'
 import { Repos } from '../../src/services/repos'
 import { FakeGithub } from '../helpers/fake-github'
+import { FakeSpawner } from '../helpers/fake-spawner'
+import type { SpawnerCapture } from '../helpers/fake-spawner'
 
 // Repos depends only on Github (clone additionally needs a git runner, exercised
 // in the command test). Over FakeGithub canned routes the service shapes each
@@ -253,6 +255,57 @@ describe('Repos service', () => {
           )
         )
       )
+    )
+  })
+
+  describe('clone', () => {
+    const githubLayer = FakeGithub.layer({
+      routes: { 'GET /repos/{owner}/{repo}': repoPayload },
+    })
+
+    it.effect('resolves the clone_url, runs git clone, and returns the resolved command', () =>
+      Effect.gen(function* () {
+        const capture: SpawnerCapture = { commands: [] }
+        const repos = yield* Repos
+        const result = yield* repos.clone('octocat/hello', {}).pipe(Effect.provide(FakeSpawner.layer(capture)))
+
+        expect(result.clone_url).toBe('https://github.com/octocat/hello.git')
+        expect(result.target_path).toBe('hello')
+        expect(result.exit_code).toBe(0)
+        expect(result.command).toBe('git clone https://github.com/octocat/hello.git')
+        expect(capture.commands).toHaveLength(1)
+        expect(capture.commands[0]).toEqual(['git', 'clone', 'https://github.com/octocat/hello.git'])
+      }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
+    )
+
+    it.effect('honors --depth and --path', () =>
+      Effect.gen(function* () {
+        const capture: SpawnerCapture = { commands: [] }
+        const repos = yield* Repos
+        const result = yield* repos
+          .clone('octocat/hello', { depth: 1, path: 'here' })
+          .pipe(Effect.provide(FakeSpawner.layer(capture)))
+
+        expect(result.target_path).toBe('here')
+        expect(result.command).toBe('git clone --depth 1 https://github.com/octocat/hello.git here')
+        expect(capture.commands[0]).toEqual([
+          'git',
+          'clone',
+          '--depth',
+          '1',
+          'https://github.com/octocat/hello.git',
+          'here',
+        ])
+      }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
+    )
+
+    it.effect('reports a non-zero exit code when git fails', () =>
+      Effect.gen(function* () {
+        const capture: SpawnerCapture = { commands: [] }
+        const repos = yield* Repos
+        const result = yield* repos.clone('octocat/hello', {}).pipe(Effect.provide(FakeSpawner.layer(capture, 128)))
+        expect(result.exit_code).toBe(128)
+      }).pipe(Effect.provide(Repos.layer.pipe(Layer.provide(githubLayer))))
     )
   })
 })

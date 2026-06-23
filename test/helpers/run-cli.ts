@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
 import * as Command from 'effect/unstable/cli/Command'
+import type { ChildProcessSpawner } from 'effect/unstable/process'
 
 import type { Envelope } from '../../src/output/envelope'
 import { Envelope as EnvelopeSchema } from '../../src/output/envelope'
@@ -12,6 +13,8 @@ import { Auth } from '../../src/services/auth'
 import { Repos } from '../../src/services/repos'
 import { FakeGithub } from './fake-github'
 import type { FakeGithubConfig } from './fake-github'
+import { FakeSpawner } from './fake-spawner'
+import type { SpawnerCapture } from './fake-spawner'
 
 // Reusable harness for command-level tests. Runs a real `Command.runWith` over a
 // network-free test layer and captures the emitted envelope WITHOUT writing real
@@ -37,6 +40,10 @@ export interface RunCliOptions {
   // `--version` flag) AND the command builder, so a handler that emits the
   // version agrees with the flag. Defaults to a test stub.
   readonly version?: string
+  // Optional capture sink for `repos clone`: when present, `git` is run through a
+  // FakeSpawner that records each argv here (and returns exit 0) instead of
+  // spawning a real process via BunServices.
+  readonly spawn?: SpawnerCapture
 }
 
 // Inert sink for every non-`log` Console method (an expression body, so it
@@ -81,7 +88,9 @@ const DEFAULT_VERSION = '0.0.0-test'
 // dependencies (`Output | Auth`) are constrained, since those are what the test
 // layer supplies.
 export const runCli = <const Name extends string, Input, E, ContextInput>(
-  build: (version: string) => Command.Command<Name, Input, ContextInput, E, Output | Auth | Repos>,
+  build: (
+    version: string
+  ) => Command.Command<Name, Input, ContextInput, E, Output | Auth | Repos | ChildProcessSpawner.ChildProcessSpawner>,
   argv: ReadonlyArray<string>,
   options: RunCliOptions = {}
 ): Effect.Effect<Envelope<unknown>> =>
@@ -96,8 +105,15 @@ export const runCli = <const Name extends string, Input, E, ContextInput>(
     // overridden separately (a service, not a layer) so stdout is captured
     // rather than written.
     const github = FakeGithub.layer(options.github ?? {})
+    // When a `spawn` capture is given, overlay the FakeSpawner so `repos clone`
+    // records argv instead of running real git; `Layer.provideMerge` keeps the
+    // rest of `BunServices` while replacing just the `ChildProcessSpawner`.
+    const platform =
+      options.spawn === undefined
+        ? BunServices.layer
+        : Layer.provideMerge(FakeSpawner.layer(options.spawn), BunServices.layer)
     const testLayer = Layer.mergeAll(
-      BunServices.layer,
+      platform,
       Output.layer({ mode: 'json' }),
       Auth.layer.pipe(Layer.provide(github)),
       Repos.layer.pipe(Layer.provide(github))

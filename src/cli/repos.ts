@@ -2,10 +2,11 @@ import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
 import { Argument, Flag } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
+import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSpawner'
 
 import { Output } from '../output/service'
 import { Repos } from '../services/repos'
-import type { CreateInput, ListInput } from '../services/repos'
+import type { CloneInput, CreateInput, ListInput } from '../services/repos'
 import { emit } from './handle'
 
 // Collapse an `Option<string>` flag into the `{ key: value }` fragment a service
@@ -114,10 +115,33 @@ const createCommand = Command.make('create', {
   )
 )
 
+const pathFlag = Flag.string('path').pipe(Flag.optional, Flag.withDescription('Local path to clone to'))
+const depthFlag = Flag.integer('depth').pipe(Flag.optional, Flag.withDescription('Create a shallow clone'))
+
+const optionalNumber = (key: string, value: O.Option<number>): Record<string, number> =>
+  O.match(value, { onNone: () => ({}), onSome: (v) => ({ [key]: v }) })
+
+const cloneCommand = Command.make('clone', { repo: repoArg, path: pathFlag, depth: depthFlag }).pipe(
+  Command.withDescription('Clone a repository'),
+  Command.withHandler(({ depth, path, repo }) =>
+    Repos.pipe(
+      Effect.flatMap((repos) => {
+        const input: CloneInput = {
+          ...optionalField('path', path),
+          ...optionalNumber('depth', depth),
+        }
+        return emit('repos.clone', repos.clone(repo, input), {
+          next_actions: ['hubctl repos show <repo>'],
+        })
+      })
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl repos` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface, mirroring
 // the root command tree.
-const subcommands = [listCommand, showCommand, createCommand] as const
+const subcommands = [listCommand, showCommand, createCommand, cloneCommand] as const
 
 interface GroupEntry {
   readonly name: string
@@ -135,7 +159,7 @@ export const reposCommand = (): Command.Command<
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Repos
+  Output | Repos | ChildProcessSpawner
 > =>
   Command.make('repos').pipe(
     Command.withDescription('Manage repositories'),

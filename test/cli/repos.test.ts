@@ -195,4 +195,47 @@ describe('repos command', () => {
       })
     )
   })
+
+  describe('clone', () => {
+    const fullPayload = {
+      name: 'hello',
+      full_name: 'octocat/hello',
+      description: 'A test repo',
+      private: false,
+      fork: false,
+      language: 'TypeScript',
+      size: 128,
+      stargazers_count: 42,
+      watchers_count: 7,
+      forks_count: 3,
+      open_issues_count: 1,
+      default_branch: 'main',
+      created_at: '2020-01-01T00:00:00Z',
+      updated_at: '2021-01-01T00:00:00Z',
+      pushed_at: '2021-02-01T00:00:00Z',
+      clone_url: 'https://github.com/octocat/hello.git',
+      ssh_url: 'git@github.com:octocat/hello.git',
+      html_url: 'https://github.com/octocat/hello',
+    }
+
+    it.effect('emits a repos.clone envelope with the resolved command and exit code', () =>
+      Effect.gen(function* () {
+        const capture: { commands: Array<ReadonlyArray<string>> } = { commands: [] }
+        const env = yield* runCli(reposCommand, ['clone', 'octocat/hello'], {
+          github: { routes: { 'GET /repos/{owner}/{repo}': fullPayload } },
+          spawn: capture,
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('repos.clone')
+        expect(env.result).toMatchObject({
+          command: 'git clone https://github.com/octocat/hello.git',
+          clone_url: 'https://github.com/octocat/hello.git',
+          target_path: 'hello',
+          exit_code: 0,
+        })
+        expect(capture.commands[0]).toEqual(['git', 'clone', 'https://github.com/octocat/hello.git'])
+      })
+    )
+  })
 })

@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
 import * as Command from 'effect/unstable/cli/Command'
+import type { ChildProcessSpawner } from 'effect/unstable/process/ChildProcessSpawner'
 
 import { Output } from '../output/service'
 import type { Auth } from '../services/auth'
@@ -46,7 +47,13 @@ const toEntry = (command: {
 
 export const rootCommand = (
   version: string
-): Command.Command<'hubctl', Record<string, never>, Record<string, never>, never, Output | Auth | Repos> => {
+): Command.Command<
+  'hubctl',
+  Record<string, never>,
+  Record<string, never>,
+  never,
+  Output | Auth | Repos | ChildProcessSpawner
+> => {
   const subcommands = [versionCommand(version), reposCommand()] as const
   const tree: CommandTree = { commands: subcommands.map(toEntry) }
 
