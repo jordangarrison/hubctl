@@ -29,6 +29,22 @@ export interface TeamListItem {
   readonly repos_count: number | '-'
 }
 
+// Full detail shape for `teams show` (lib/hubctl/teams.rb#show `team_details`).
+export interface TeamDetail {
+  readonly id: number
+  readonly name: string
+  readonly slug: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly description: string | null
+  readonly privacy: string
+  readonly permission: string
+  readonly members_count: number
+  readonly repos_count: number
+  readonly created_at: string
+  readonly updated_at: string
+  readonly url: string
+}
+
 export interface CreateInput {
   readonly description?: string
   readonly privacy: TeamPrivacy
@@ -72,6 +88,7 @@ export interface RemoveResult {
 
 export interface TeamsShape {
   readonly list: (org: string) => Effect.Effect<ReadonlyArray<TeamListItem>, GithubError>
+  readonly show: (org: string, team: string) => Effect.Effect<TeamDetail, GithubError>
   readonly create: (org: string, name: string, input: CreateInput) => Effect.Effect<CreatedTeam, GithubError>
   readonly members: (org: string, team: string) => Effect.Effect<ReadonlyArray<TeamMember>, GithubError>
   readonly add: (org: string, team: string, user: string, role: TeamRole) => Effect.Effect<AddResult, GithubError>
@@ -103,6 +120,38 @@ const toListItem = (team: typeof TeamSummary.Type): TeamListItem => ({
   permission: team.permission,
   members_count: team.members_count ?? '-',
   repos_count: team.repos_count ?? '-',
+})
+
+// Full team payload for `show`, read from the detail endpoint
+// (GET /orgs/{org}/teams/{team_slug}) which — unlike the list endpoint —
+// returns members_count/repos_count/created_at/updated_at/html_url.
+const TeamFull = Schema.Struct({
+  id: Schema.Finite,
+  name: Schema.String,
+  slug: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  privacy: Schema.String,
+  permission: Schema.String,
+  members_count: Schema.Finite,
+  repos_count: Schema.Finite,
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  html_url: Schema.String,
+})
+const decodeFull = Schema.decodeUnknownSync(TeamFull)
+
+const toDetail = (team: typeof TeamFull.Type): TeamDetail => ({
+  id: team.id,
+  name: team.name,
+  slug: team.slug,
+  description: team.description,
+  privacy: team.privacy,
+  permission: team.permission,
+  members_count: team.members_count,
+  repos_count: team.repos_count,
+  created_at: team.created_at,
+  updated_at: team.updated_at,
+  url: team.html_url,
 })
 
 // Created-team summary fields (lib/hubctl/teams.rb#create).
@@ -162,6 +211,15 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
           Effect.withSpan('Teams.list')
         )
 
+      // `show` reads the team detail endpoint (which returns the
+      // members_count/repos_count/timestamps the list endpoint omits) rather than
+      // scanning the list, surfacing the same NotFoundError the Ruby reports when
+      // the slug is unknown.
+      const show: TeamsShape['show'] = (org, team) =>
+        github
+          .request('GET /orgs/{org}/teams/{team_slug}', { org, team_slug: team })
+          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Teams.show'))
+
       const create: TeamsShape['create'] = (org, name, input) =>
         github
           .request('POST /orgs/{org}/teams', { org, ...createBody(name, input) })
@@ -202,7 +260,7 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
           })
           .pipe(Effect.as({ team, user, removed: true }), Effect.withSpan('Teams.remove'))
 
-      return { list, create, members, add, remove }
+      return { list, show, create, members, add, remove }
     })
   )
 }

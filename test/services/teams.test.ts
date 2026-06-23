@@ -118,6 +118,70 @@ describe('Teams service', () => {
     )
   })
 
+  describe('show', () => {
+    const detailPayload = {
+      id: 7,
+      name: 'Core',
+      slug: 'core',
+      description: 'Core maintainers',
+      privacy: 'closed',
+      permission: 'push',
+      members_count: 4,
+      repos_count: 12,
+      created_at: '2020-01-01T00:00:00Z',
+      updated_at: '2021-02-02T00:00:00Z',
+      html_url: 'https://github.com/orgs/acme/teams/core',
+    }
+
+    it.effect('fetches a team detail via GET /orgs/{org}/teams/{team_slug}', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.show('acme', 'core')
+        expect(result).toEqual({
+          id: 7,
+          name: 'Core',
+          slug: 'core',
+          description: 'Core maintainers',
+          privacy: 'closed',
+          permission: 'push',
+          members_count: 4,
+          repos_count: 12,
+          created_at: '2020-01-01T00:00:00Z',
+          updated_at: '2021-02-02T00:00:00Z',
+          url: 'https://github.com/orgs/acme/teams/core',
+        })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams/{team_slug}': (params: Record<string, unknown>) =>
+                    params.org === 'acme' && params.team_slug === 'core'
+                      ? detailPayload
+                      : { ...detailPayload, slug: 'WRONG' },
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError when the team 404s', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.show('acme', 'missing'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/teams/{team_slug}': 404 } })))
+        )
+      )
+    )
+  })
+
   describe('create', () => {
     const created = { id: 99, name: 'Squad', slug: 'squad', privacy: 'closed', permission: 'pull' }
 

@@ -39,6 +39,21 @@ const TeamListItem = Schema.Struct({
 })
 const decodeList = Schema.decodeUnknownSync(Schema.Array(TeamListItem))
 
+const TeamDetail = Schema.Struct({
+  id: Schema.Finite,
+  name: Schema.String,
+  slug: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  privacy: Schema.String,
+  permission: Schema.String,
+  members_count: Schema.Finite,
+  repos_count: Schema.Finite,
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  url: Schema.String,
+})
+const decodeDetail = Schema.decodeUnknownSync(TeamDetail)
+
 const TeamMember = Schema.Struct({
   login: Schema.String,
   id: Schema.Finite,
@@ -65,6 +80,7 @@ describe('teams command', () => {
       const tree = decodeGroup(env.result)
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('list')
+      expect(names).toContain('show')
       expect(names).toContain('create')
       expect(names).toContain('members')
       expect(names).toContain('add')
@@ -125,6 +141,54 @@ describe('teams command', () => {
 
         expect(env.ok).toBe(false)
         expect(env.command).toBe('teams.list')
+        expect(env.result).toBeNull()
+        expect(env.error?.code).toBe('NotFoundError')
+        expect(env.fix).not.toBeNull()
+      })
+    )
+  })
+
+  describe('show', () => {
+    const detailPayload = {
+      id: 7,
+      name: 'Core',
+      slug: 'core',
+      description: 'Core maintainers',
+      privacy: 'closed',
+      permission: 'push',
+      members_count: 4,
+      repos_count: 12,
+      created_at: '2020-01-01T00:00:00Z',
+      updated_at: '2021-02-02T00:00:00Z',
+      html_url: 'https://github.com/orgs/acme/teams/core',
+    }
+
+    it.effect('emits a teams.show envelope with the team detail', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['show', 'core', '--org', 'acme'], {
+          github: { routes: { 'GET /orgs/{org}/teams/{team_slug}': detailPayload } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.show')
+        expect(env.error).toBeNull()
+
+        const detail = decodeDetail(env.result)
+        expect(detail.slug).toBe('core')
+        expect(detail.members_count).toBe(4)
+        expect(detail.url).toBe('https://github.com/orgs/acme/teams/core')
+        expect(env.next_actions).toContain('hubctl teams members <team> --org <org>')
+      })
+    )
+
+    it.effect('surfaces an ok:false envelope with a fix when the team 404s', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['show', 'missing', '--org', 'acme'], {
+          github: { fail: { 'GET /orgs/{org}/teams/{team_slug}': 404 } },
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.show')
         expect(env.result).toBeNull()
         expect(env.error?.code).toBe('NotFoundError')
         expect(env.fix).not.toBeNull()
