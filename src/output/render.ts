@@ -16,6 +16,30 @@ export interface RenderOptions {
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
+// Result lists longer than this are capped; the rendered output carries
+// `truncated: true` and a `count` equal to the full original length.
+const TRUNCATE_LIMIT = 50
+
+interface TruncatedResult {
+  readonly truncated: true
+  readonly count: number
+  readonly items: ReadonlyArray<unknown>
+}
+
+// When the envelope `result` is a list longer than the limit, replace it with a
+// truncation wrapper: the first `TRUNCATE_LIMIT` items plus `truncated`/`count`
+// metadata. Other shapes pass through unchanged.
+const truncateEnvelope = <A>(envelope: Envelope<A>): Envelope<A | TruncatedResult> => {
+  const { result } = envelope
+  if (Array.isArray(result) && result.length > TRUNCATE_LIMIT) {
+    return {
+      ...envelope,
+      result: { truncated: true, count: result.length, items: result.slice(0, TRUNCATE_LIMIT) },
+    }
+  }
+  return envelope
+}
+
 // Compact, single-line JSON. Round-trips through the Envelope schema.
 export const renderJson = <A>(envelope: Envelope<A>): string => encodeJson(envelope)
 
@@ -59,5 +83,7 @@ const renderPretty = <A>(envelope: Envelope<A>, _options: RenderOptions): string
   return formatCell(result)
 }
 
-export const render = <A>(mode: Mode, envelope: Envelope<A>, options: RenderOptions): string =>
-  mode === 'json' ? renderJson(envelope) : renderPretty(envelope, options)
+export const render = <A>(mode: Mode, envelope: Envelope<A>, options: RenderOptions): string => {
+  const truncated = truncateEnvelope(envelope)
+  return mode === 'json' ? renderJson(truncated) : renderPretty(truncated, options)
+}

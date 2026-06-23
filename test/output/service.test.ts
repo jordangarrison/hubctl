@@ -8,6 +8,14 @@ import { Output } from '../../src/output/service'
 
 const parseJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 const decodeEnvelope = Schema.decodeUnknownSync(Envelope(Schema.Unknown))
+const decodeTruncated = Schema.decodeUnknownSync(
+  Schema.Struct({
+    // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+    truncated: Schema.Boolean,
+    count: Schema.Finite,
+    items: Schema.Array(Schema.Unknown),
+  })
+)
 
 // Builds a Console whose `log` appends each rendered chunk to `lines`, so a test
 // can assert exactly what the Output service wrote to stdout.
@@ -68,6 +76,23 @@ describe('Output service', () => {
       expect(text.includes('name')).toBe(true)
       expect(text.includes('alpha')).toBe(true)
     }).pipe(Effect.provide(Output.layer({ mode: 'pretty' })))
+  )
+
+  it.effect('json mode truncates a result list longer than 50 to 50 items with truncated:true and full count', () =>
+    Effect.gen(function* () {
+      const lines: Array<string> = []
+      const output = yield* Output
+      const big = Array.from({ length: 60 }, (_, i) => ({ name: `repo-${i}` }))
+      yield* Effect.provideService(output.ok('repos.list', big), Console.Console, captureConsole(lines))
+
+      const env = decodeEnvelope(parseJson(lines[0] ?? ''))
+      const result = decodeTruncated(env.result)
+      expect(result.truncated).toBe(true)
+      expect(result.count).toBe(60)
+      expect(result.items.length).toBe(50)
+      expect(result.items[0]).toEqual({ name: 'repo-0' })
+      expect(result.items[49]).toEqual({ name: 'repo-49' })
+    }).pipe(Effect.provide(Output.layer({ mode: 'json' })))
   )
 
   it.effect('fail prints an ok:false envelope whose error and fix derive from the tagged error', () =>
