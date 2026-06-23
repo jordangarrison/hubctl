@@ -3,20 +3,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Ruby & Bundler
-vendor/bundle/
-vendor/cache/
-.bundle/
-
-# Gem build artifacts
-*.gem
-pkg/
-.gem/
-
-# Ruby version managers
-.ruby-version
-.rbenv-version
-
 # IDE & Editor files
 .vscode/
 .idea/
@@ -43,7 +29,6 @@ temp/
 
 # Coverage reports
 coverage/
-.simplecov
 
 # Nix
 result
@@ -56,22 +41,6 @@ result-*
 .env
 .env.local
 .env.*.local
-
-# RuboCop cache
-.rubocop-*
-
-# Solargraph cache
-.solargraph/
-
-# Test artifacts
-.rspec
-.rspec_status
-spec/examples.txt
-
-# Documentation
-doc/
-.yardoc/
-.yard/
 
 # Tags
 tags
