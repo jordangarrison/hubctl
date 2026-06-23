@@ -136,8 +136,35 @@ export interface RemoveOrgResult {
   readonly removed: boolean
 }
 
+// === Members & owners ===
+
+// Shaped member/owner row (lib/hubctl/github_client.rb#transform_member_data).
+// `id`/`avatar_url` are always null in the consumed-licenses port (the wire
+// payload doesn't carry them); `email` is the first verified domain email.
+export interface EnterpriseMember {
+  readonly login: string
+  readonly id: null
+  readonly role: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly email: string | null
+  readonly two_factor_disabled: boolean
+  readonly saml_identity: string
+  readonly avatar_url: null
+}
+
+export type EnterpriseMemberRole = 'all' | 'admin' | 'owner' | 'member' | 'billing_manager'
+
+export interface MembersInput {
+  readonly role?: EnterpriseMemberRole
+  readonly twoFaDisabled?: boolean
+}
+
 export interface EnterpriseShape {
   readonly billing: (enterprise: string) => Effect.Effect<BillingResult, GithubError>
+  readonly members: (
+    enterprise: string,
+    input: MembersInput
+  ) => Effect.Effect<ReadonlyArray<EnterpriseMember>, GithubError>
   readonly organizations: (
     enterprise: string,
     input: OrganizationsInput
@@ -323,6 +350,85 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
   ...(input.billingEmail === undefined ? {} : { billing_email: input.billingEmail }),
 })
 
+// === Members & owners helpers ===
+
+// Raw consumed-license user record (lib/hubctl/github_client.rb consumed-licenses
+// payload). All fields are optional/nullable on the wire; the transform applies
+// the Ruby defaults.
+const ConsumedUser = Schema.Struct({
+  github_com_login: Schema.optional(Schema.NullOr(Schema.String)),
+  github_com_enterprise_roles: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  github_com_verified_domain_emails: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  github_com_two_factor_auth: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  github_com_saml_name_id: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+const ConsumedLicenses = Schema.Struct({
+  users: Schema.optional(Schema.NullOr(Schema.Array(ConsumedUser))),
+})
+const decodeConsumedLicenses = Schema.decodeUnknownSync(ConsumedLicenses)
+
+type ConsumedUser = typeof ConsumedUser.Type
+
+// Number of users per consumed-licenses page; matches the Ruby `per_page: 100`
+// and the `< 100 ⇒ last page` termination condition.
+const LICENSE_PAGE_SIZE = 100
+// Safety break mirroring the Ruby `break if page > 50`.
+const LICENSE_MAX_PAGES = 50
+
+const roles = (user: ConsumedUser): ReadonlyArray<string> => user.github_com_enterprise_roles ?? []
+
+const twoFaEnabled = (user: ConsumedUser): boolean => user.github_com_two_factor_auth ?? false
+
+const isOwner = (user: ConsumedUser): boolean => roles(user).includes('Owner')
+
+// Map enterprise roles to the displayed role (lib/hubctl#determine_user_role).
+const determineRole = (user: ConsumedUser): string => {
+  const r = roles(user)
+  if (r.includes('Owner')) {
+    return 'admin'
+  }
+  if (r.includes('Member')) {
+    return 'member'
+  }
+  if (r.includes('Outside collaborator')) {
+    return 'collaborator'
+  }
+  if (r.includes('Pending invitation')) {
+    return 'pending'
+  }
+  return 'unknown'
+}
+
+const transformMember = (user: ConsumedUser): EnterpriseMember => ({
+  login: user.github_com_login ?? '',
+  id: null,
+  role: determineRole(user),
+  email: user.github_com_verified_domain_emails?.[0] ?? null,
+  two_factor_disabled: !twoFaEnabled(user),
+  saml_identity:
+    user.github_com_saml_name_id !== undefined && user.github_com_saml_name_id !== null ? 'configured' : 'none',
+  avatar_url: null,
+})
+
+// Apply the role filter (lib/hubctl#filter_by_role): admin/owner ⇒ owners only;
+// member ⇒ Members that aren't also Owners; anything else ⇒ no filtering.
+const filterByRole = (users: ReadonlyArray<ConsumedUser>, role: MembersInput['role']): ReadonlyArray<ConsumedUser> => {
+  if (role === 'admin' || role === 'owner') {
+    return users.filter(isOwner)
+  }
+  if (role === 'member') {
+    return users.filter((user) => roles(user).includes('Member') && !isOwner(user))
+  }
+  return users
+}
+
+// Filter members by role + 2FA (lib/hubctl#filter_members_by_options).
+const filterMembers = (allUsers: ReadonlyArray<ConsumedUser>, input: MembersInput): ReadonlyArray<ConsumedUser> => {
+  const byRole = filterByRole(allUsers, input.role)
+  return input.twoFaDisabled === true ? byRole.filter((user) => !twoFaEnabled(user)) : byRole
+}
+
 export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('Enterprise') {
   static readonly layer: Layer.Layer<Enterprise, never, Github> = Layer.effect(
     Enterprise,
@@ -337,6 +443,43 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
             return items.length === 0 ? { kind: 'empty', enterprise } : summarize(enterprise, items)
           }),
           Effect.withSpan('Enterprise.billing')
+        )
+
+      // Replicate the Ruby `fetch_all_enterprise_users` page loop: fetch
+      // `/consumed-licenses` a page at a time (per_page=100), accumulating the
+      // `users` array, stopping when a page returns fewer than a full page (or
+      // the 50-page safety break). The consumed-licenses payload wraps users in
+      // `{ users: [] }` (not a flat array), so this uses `request` per page
+      // rather than `paginate`. Leaves a clean seam for streaming later phases.
+      const fetchAllUsers = (enterprise: string): Effect.Effect<ReadonlyArray<ConsumedUser>, GithubError> => {
+        const fetchPage = (
+          page: number,
+          acc: ReadonlyArray<ConsumedUser>
+        ): Effect.Effect<ReadonlyArray<ConsumedUser>, GithubError> =>
+          github
+            .request('GET /enterprises/{enterprise}/consumed-licenses', {
+              enterprise,
+              per_page: LICENSE_PAGE_SIZE,
+              page,
+            })
+            .pipe(
+              Effect.map(decodeConsumedLicenses),
+              Effect.map((decoded) => decoded.users ?? []),
+              Effect.flatMap((users) => {
+                const next = [...acc, ...users]
+                if (users.length < LICENSE_PAGE_SIZE || page >= LICENSE_MAX_PAGES) {
+                  return Effect.succeed(next)
+                }
+                return fetchPage(page + 1, next)
+              })
+            )
+        return fetchPage(1, [])
+      }
+
+      const members: EnterpriseShape['members'] = (enterprise, input) =>
+        fetchAllUsers(enterprise).pipe(
+          Effect.map((users) => filterMembers(users, input).map(transformMember)),
+          Effect.withSpan('Enterprise.members')
         )
 
       const organizations: EnterpriseShape['organizations'] = (enterprise, input) =>
@@ -376,7 +519,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
             Effect.withSpan('Enterprise.removeOrganization')
           )
 
-      return { billing, organizations, createOrganization, transferOrganization, removeOrganization }
+      return { billing, members, organizations, createOrganization, transferOrganization, removeOrganization }
     })
   )
 }

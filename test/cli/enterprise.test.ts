@@ -106,4 +106,54 @@ describe('enterprise command', () => {
       })
     )
   })
+
+  describe('members', () => {
+    const users = [
+      {
+        github_com_login: 'alice',
+        github_com_enterprise_roles: ['Owner'],
+        github_com_verified_domain_emails: ['alice@acme.test'],
+        github_com_two_factor_auth: true,
+        github_com_saml_name_id: 'alice@acme.test',
+      },
+      {
+        github_com_login: 'bob',
+        github_com_enterprise_roles: ['Member'],
+        github_com_verified_domain_emails: [],
+        github_com_two_factor_auth: false,
+        github_com_saml_name_id: null,
+      },
+    ]
+    const consumedRoutes = { routes: { 'GET /enterprises/{enterprise}/consumed-licenses': { users } } }
+
+    it.effect('lists all members', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['members', 'acme'], { github: consumedRoutes })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.members')
+        expect(env.result).toMatchObject([
+          { login: 'alice', role: 'admin' },
+          { login: 'bob', role: 'member' },
+        ])
+      })
+    )
+
+    it.effect('filters by --role member', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['members', 'acme', '--role', 'member'], {
+          github: consumedRoutes,
+        })
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'bob' }])
+      })
+    )
+
+    it.effect('filters by --2fa-disabled', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['members', 'acme', '--2fa-disabled'], { github: consumedRoutes })
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'bob' }])
+      })
+    )
+  })
 })

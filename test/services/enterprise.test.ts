@@ -146,4 +146,68 @@ describe('Enterprise service', () => {
       }).pipe(Effect.provide(withRoutes({ fail: { 'GET /enterprises/{enterprise}/organizations': 404 } })))
     )
   })
+
+  describe('members', () => {
+    const consumedRoute = 'GET /enterprises/{enterprise}/consumed-licenses'
+    const users = [
+      {
+        github_com_login: 'alice',
+        github_com_enterprise_roles: ['Owner'],
+        github_com_verified_domain_emails: ['alice@acme.test'],
+        github_com_two_factor_auth: true,
+        github_com_saml_name_id: 'alice@acme.test',
+      },
+      {
+        github_com_login: 'bob',
+        github_com_enterprise_roles: ['Member'],
+        github_com_verified_domain_emails: [],
+        github_com_two_factor_auth: false,
+        github_com_saml_name_id: null,
+      },
+    ]
+
+    it.effect('lists all members with shaped/transformed rows', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.members(enterprise, {})
+        expect(result).toHaveLength(2)
+        expect(result[0]).toEqual({
+          login: 'alice',
+          id: null,
+          role: 'admin',
+          email: 'alice@acme.test',
+          two_factor_disabled: false,
+          saml_identity: 'configured',
+          avatar_url: null,
+        })
+        expect(result[1]).toEqual({
+          login: 'bob',
+          id: null,
+          role: 'member',
+          email: null,
+          two_factor_disabled: true,
+          saml_identity: 'none',
+          avatar_url: null,
+        })
+      }).pipe(Effect.provide(withRoutes({ routes: { [consumedRoute]: { users } } })))
+    )
+
+    it.effect('filters by role=member (excludes owners)', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.members(enterprise, { role: 'member' })
+        expect(result).toHaveLength(1)
+        expect(result[0]?.login).toBe('bob')
+      }).pipe(Effect.provide(withRoutes({ routes: { [consumedRoute]: { users } } })))
+    )
+
+    it.effect('filters by twoFaDisabled (excludes 2FA-enabled users)', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const result = yield* ent.members(enterprise, { twoFaDisabled: true })
+        expect(result).toHaveLength(1)
+        expect(result[0]?.login).toBe('bob')
+      }).pipe(Effect.provide(withRoutes({ routes: { [consumedRoute]: { users } } })))
+    )
+  })
 })

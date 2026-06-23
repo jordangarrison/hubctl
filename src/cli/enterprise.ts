@@ -5,7 +5,7 @@ import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Enterprise } from '../services/enterprise'
-import type { CreateOrgInput, OrganizationsInput } from '../services/enterprise'
+import type { CreateOrgInput, MembersInput, OrganizationsInput } from '../services/enterprise'
 import { emit } from './handle'
 
 // The `enterprise` command group. Commands stay THIN: parse Flags/Arguments,
@@ -194,9 +194,41 @@ const orgsCommand = Command.make('orgs').pipe(
   Command.withSubcommands(orgsSubcommands)
 )
 
+// === members ===
+
+const roleFlag = Flag.choice('role', ['all', 'admin', 'owner', 'member', 'billing_manager']).pipe(
+  Flag.optional,
+  Flag.withDescription('Filter members by role')
+)
+const twoFaFlag = Flag.boolean('2fa-disabled').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Only members without 2FA enabled')
+)
+
+const membersCommand = Command.make('members', {
+  enterprise: enterpriseArg,
+  role: roleFlag,
+  twoFaDisabled: twoFaFlag,
+}).pipe(
+  Command.withDescription('List enterprise members'),
+  Command.withHandler(({ enterprise, role, twoFaDisabled }) =>
+    Enterprise.pipe(
+      Effect.flatMap((ent) => {
+        const input: MembersInput = {
+          ...O.match(role, { onNone: () => ({}), onSome: (v) => ({ role: v }) }),
+          twoFaDisabled,
+        }
+        return emit('enterprise.members', ent.members(enterprise, input), {
+          next_actions: ['hubctl enterprise owners list <enterprise>'],
+        })
+      })
+    )
+  )
+)
+
 // === group discovery ===
 
-const subcommands = [orgsCommand] as const
+const subcommands = [orgsCommand, membersCommand] as const
 
 export const enterpriseCommand = (): Command.Command<
   'enterprise',
