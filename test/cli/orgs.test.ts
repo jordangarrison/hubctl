@@ -45,6 +45,14 @@ const orgDetail = {
   html_url: 'https://github.com/acme',
 }
 
+const memberPayload = {
+  login: 'octocat',
+  id: 1,
+  type: 'User',
+  site_admin: false,
+  html_url: 'https://github.com/octocat',
+}
+
 const OrgListItem = Schema.Struct({
   login: Schema.String,
   id: Schema.Finite,
@@ -73,6 +81,7 @@ describe('orgs command', () => {
       const names = tree.commands.map((c) => c.name)
       expect(names).toContain('list')
       expect(names).toContain('show')
+      expect(names).toContain('members')
     })
   )
 
@@ -118,6 +127,52 @@ describe('orgs command', () => {
         expect(env.ok).toBe(false)
         expect(env.command).toBe('orgs.show')
         expect(env.error?.code).toBe('NotFoundError')
+      })
+    )
+  })
+
+  describe('members', () => {
+    it.effect('emits an orgs.members envelope with shaped rows', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['members', 'acme'], {
+          github: { routes: { 'GET /orgs/{org}/members': [memberPayload] } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.members')
+        expect(env.result).toMatchObject([{ login: 'octocat', type: 'User', site_admin: false }])
+      })
+    )
+
+    it.effect('--role admin forwards the role param', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['members', 'acme', '--role', 'admin'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
+                params.role === 'admin' ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'octocat' }])
+      })
+    )
+
+    it.effect('--2fa-disabled forwards filter=2fa_disabled', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['members', 'acme', '--2fa-disabled'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
+                params.filter === '2fa_disabled' ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject([{ login: 'octocat' }])
       })
     )
   })

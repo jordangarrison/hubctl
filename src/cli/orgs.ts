@@ -1,10 +1,11 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import { Argument } from 'effect/unstable/cli'
+import { Argument, Flag } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
 import { Orgs } from '../services/orgs'
+import type { MembersInput } from '../services/orgs'
 import { emit } from './handle'
 
 const orgArg = Argument.string('org').pipe(Argument.withDescription('Organization login'))
@@ -39,9 +40,32 @@ const showCommand = Command.make('show', { org: orgArg }).pipe(
   )
 )
 
+const roleFlag = Flag.choice('role', ['all', 'admin', 'member']).pipe(
+  Flag.withDefault('all'),
+  Flag.withDescription('Filter members by role')
+)
+const twoFaFlag = Flag.boolean('2fa-disabled').pipe(
+  Flag.withDefault(false),
+  Flag.withDescription('Only members with 2FA disabled')
+)
+
+const membersCommand = Command.make('members', { org: orgArg, role: roleFlag, twoFaDisabled: twoFaFlag }).pipe(
+  Command.withDescription('List organization members'),
+  Command.withHandler(({ org, role, twoFaDisabled }) =>
+    Orgs.pipe(
+      Effect.flatMap((orgs) => {
+        const input: MembersInput = { role, twoFaDisabled }
+        return emit('orgs.members', orgs.members(org, input), {
+          next_actions: ['hubctl orgs show <org>'],
+        })
+      })
+    )
+  )
+)
+
 // Subcommand discovery for `hubctl orgs` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, showCommand] as const
+const subcommands = [listCommand, showCommand, membersCommand] as const
 
 interface GroupEntry {
   readonly name: string

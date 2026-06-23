@@ -50,6 +50,14 @@ const orgDetail = {
   html_url: 'https://github.com/acme',
 }
 
+const memberPayload = {
+  login: 'octocat',
+  id: 1,
+  type: 'User',
+  site_admin: false,
+  html_url: 'https://github.com/octocat',
+}
+
 describe('Orgs service', () => {
   describe('list', () => {
     it.effect('lists the authenticated user orgs via GET /user/orgs', () =>
@@ -150,6 +158,69 @@ describe('Orgs service', () => {
         const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
         expect(error).toBeInstanceOf(NotFoundError)
       }).pipe(Effect.provide(Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}': 404 } })))))
+    )
+  })
+
+  describe('members', () => {
+    it.effect('lists members via GET /orgs/{org}/members and shapes each row', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.members('acme', {})
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({
+          login: 'octocat',
+          id: 1,
+          type: 'User',
+          site_admin: false,
+          url: 'https://github.com/octocat',
+        })
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /orgs/{org}/members': [memberPayload] } })))
+        )
+      )
+    )
+
+    it.effect('forwards role when not "all"', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.members('acme', { role: 'admin' })
+        expect(result[0]?.login).toBe('octocat')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
+                    params.role === 'admin' ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('sends filter=2fa_disabled when twoFaDisabled is set', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const result = yield* orgs.members('acme', { twoFaDisabled: true })
+        expect(result[0]?.login).toBe('octocat')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/members': (params: Record<string, unknown>) =>
+                    params.filter === '2fa_disabled' ? [memberPayload] : [{ ...memberPayload, login: 'WRONG' }],
+                },
+              })
+            )
+          )
+        )
+      )
     )
   })
 })

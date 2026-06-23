@@ -63,9 +63,26 @@ export interface OrgDetail {
   readonly url: string
 }
 
+// Row shape for `orgs members` (lib/hubctl/orgs.rb#members `member_data`).
+export interface OrgMember {
+  readonly login: string
+  readonly id: number
+  readonly type: string
+  readonly site_admin: boolean
+  readonly url: string
+}
+
+export type MemberRole = 'all' | 'admin' | 'member'
+
+export interface MembersInput {
+  readonly role?: MemberRole
+  readonly twoFaDisabled?: boolean
+}
+
 export interface OrgsShape {
   readonly list: Effect.Effect<ReadonlyArray<OrgListItem>, GithubError>
   readonly show: (org: string) => Effect.Effect<OrgDetail, GithubError>
+  readonly members: (org: string, input: MembersInput) => Effect.Effect<ReadonlyArray<OrgMember>, GithubError>
 }
 
 // Raw org summary fields read by `list`. `description` is nullable on the wire;
@@ -138,6 +155,34 @@ const toDetail = (org: typeof OrgFull.Type): OrgDetail => ({
   url: org.html_url,
 })
 
+// Raw member payload fields read by `members`.
+const Member = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  type: Schema.String,
+  // `site_admin` is GitHub's wire field name; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  site_admin: Schema.Boolean,
+  html_url: Schema.String,
+})
+const decodeMembers = Schema.decodeUnknownSync(Schema.Array(Member))
+
+const toMember = (member: typeof Member.Type): OrgMember => ({
+  login: member.login,
+  id: member.id,
+  type: member.type,
+  site_admin: member.site_admin,
+  url: member.html_url,
+})
+
+// GitHub's member list treats `role=all` as the default; the Ruby omits the
+// param in that case, so we mirror that and only send an explicit non-`all`
+// role. `--2fa-disabled` maps to the `filter=2fa_disabled` query param.
+const memberParams = (input: MembersInput): Record<string, unknown> => ({
+  ...(input.role === undefined || input.role === 'all' ? {} : { role: input.role }),
+  ...(input.twoFaDisabled === true ? { filter: '2fa_disabled' } : {}),
+})
+
 const toListItem = (org: typeof OrgSummary.Type): OrgListItem => ({
   login: org.login,
   id: org.id,
@@ -166,7 +211,14 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
           .request('GET /orgs/{org}', { org })
           .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Orgs.show'))
 
-      return { list, show }
+      const members: OrgsShape['members'] = (org, input) =>
+        github.paginate('GET /orgs/{org}/members', { org, ...memberParams(input) }).pipe(
+          Effect.map(decodeMembers),
+          Effect.map((list_) => list_.map(toMember)),
+          Effect.withSpan('Orgs.members')
+        )
+
+      return { list, show, members }
     })
   )
 }
