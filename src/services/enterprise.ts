@@ -603,32 +603,20 @@ const StatsRaw = Schema.Struct({
   repos: Schema.optional(
     Schema.NullOr(Schema.Struct({ total_repos: Num, root_repos: Num, fork_repos: Num, org_repos: Num }))
   ),
-  hooks: Schema.optional(
-    Schema.NullOr(Schema.Struct({ total_hooks: Num, active_hooks: Num, inactive_hooks: Num }))
-  ),
+  hooks: Schema.optional(Schema.NullOr(Schema.Struct({ total_hooks: Num, active_hooks: Num, inactive_hooks: Num }))),
   pages: Schema.optional(Schema.NullOr(Schema.Struct({ total_pages: Num }))),
   orgs: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ total_orgs: Num, disabled_orgs: Num, total_teams: Num, total_team_members: Num })
-    )
+    Schema.NullOr(Schema.Struct({ total_orgs: Num, disabled_orgs: Num, total_teams: Num, total_team_members: Num }))
   ),
-  users: Schema.optional(
-    Schema.NullOr(Schema.Struct({ total_users: Num, admin_users: Num, suspended_users: Num }))
-  ),
+  users: Schema.optional(Schema.NullOr(Schema.Struct({ total_users: Num, admin_users: Num, suspended_users: Num }))),
   pulls: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ total_pulls: Num, merged_pulls: Num, mergeable_pulls: Num, unmergeable_pulls: Num })
-    )
+    Schema.NullOr(Schema.Struct({ total_pulls: Num, merged_pulls: Num, mergeable_pulls: Num, unmergeable_pulls: Num }))
   ),
-  issues: Schema.optional(
-    Schema.NullOr(Schema.Struct({ total_issues: Num, open_issues: Num, closed_issues: Num }))
-  ),
+  issues: Schema.optional(Schema.NullOr(Schema.Struct({ total_issues: Num, open_issues: Num, closed_issues: Num }))),
   milestones: Schema.optional(
     Schema.NullOr(Schema.Struct({ total_milestones: Num, open_milestones: Num, closed_milestones: Num }))
   ),
-  gists: Schema.optional(
-    Schema.NullOr(Schema.Struct({ total_gists: Num, private_gists: Num, public_gists: Num }))
-  ),
+  gists: Schema.optional(Schema.NullOr(Schema.Struct({ total_gists: Num, private_gists: Num, public_gists: Num }))),
 })
 const decodeStats = Schema.decodeUnknownSync(StatsRaw)
 
