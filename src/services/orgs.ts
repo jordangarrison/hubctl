@@ -11,16 +11,24 @@ import type { GithubError } from '../github/errors'
 // the Ruby tool's output fields. Each method maps a GitHub REST route through
 // `Github.request`/`paginate` and reshapes the raw payload.
 
-// Row shape for `orgs list` (lib/hubctl/orgs.rb#list `org_data`).
+// Row shape for `orgs list`. The list endpoint (`GET /user/orgs`) returns a
+// MINIMAL org object — login/id/description/url only; the per-org counts and
+// `html_url` are absent (they live on the `GET /orgs/{org}` detail). The Ruby
+// read them anyway and rendered `nil`, so these stay nullable here.
 export interface OrgListItem {
   readonly login: string
   readonly id: number
   readonly description: string
-  readonly public_repos: number
-  readonly public_gists: number
-  readonly followers: number
-  readonly following: number
-  readonly url: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly public_repos: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly public_gists: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly followers: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly following: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly url: string | null
 }
 
 // Full detail shape for `orgs show` (lib/hubctl/orgs.rb#show `org_details`).
@@ -104,8 +112,10 @@ export interface OrgTeam {
   readonly slug: string
   readonly description: string
   readonly privacy: string
-  readonly members_count: number
-  readonly repos_count: number
+  // The team LIST endpoint (`GET /orgs/{org}/teams`) omits these counts (only the
+  // team detail returns them); render '-' when absent, matching `teams list`.
+  readonly members_count: number | '-'
+  readonly repos_count: number | '-'
 }
 
 // A single numbered org membership in the `orgs info` view.
@@ -141,11 +151,12 @@ const OrgSummary = Schema.Struct({
   login: Schema.String,
   id: Schema.Finite,
   description: Schema.NullOr(Schema.String),
-  public_repos: Schema.Finite,
-  public_gists: Schema.Finite,
-  followers: Schema.Finite,
-  following: Schema.Finite,
-  html_url: Schema.String,
+  // Absent from `GET /user/orgs`; present only on the org detail endpoint.
+  public_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  public_gists: Schema.optional(Schema.NullOr(Schema.Finite)),
+  followers: Schema.optional(Schema.NullOr(Schema.Finite)),
+  following: Schema.optional(Schema.NullOr(Schema.Finite)),
+  html_url: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(OrgSummary))
 
@@ -160,7 +171,8 @@ const OrgFull = Schema.Struct({
   blog: Schema.NullOr(Schema.String),
   location: Schema.NullOr(Schema.String),
   email: Schema.NullOr(Schema.String),
-  bio: Schema.NullOr(Schema.String),
+  // `bio` is a USER field; organizations never return it. Optional, not required.
+  bio: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.NullOr(Schema.String),
   public_repos: Schema.Finite,
   public_gists: Schema.Finite,
@@ -187,7 +199,7 @@ const toDetail = (org: typeof OrgFull.Type): OrgDetail => ({
   blog: org.blog,
   location: org.location,
   email: org.email,
-  bio: org.bio,
+  bio: org.bio ?? null,
   description: org.description,
   public_repos: org.public_repos,
   public_gists: org.public_gists,
@@ -237,11 +249,11 @@ const toListItem = (org: typeof OrgSummary.Type): OrgListItem => ({
   login: org.login,
   id: org.id,
   description: org.description ?? '-',
-  public_repos: org.public_repos,
-  public_gists: org.public_gists,
-  followers: org.followers,
-  following: org.following,
-  url: org.html_url,
+  public_repos: org.public_repos ?? null,
+  public_gists: org.public_gists ?? null,
+  followers: org.followers ?? null,
+  following: org.following ?? null,
+  url: org.html_url ?? null,
 })
 
 // Raw org-repo payload fields read by `repos`. `description`/`language` are
@@ -284,8 +296,9 @@ const TeamRaw = Schema.Struct({
   slug: Schema.String,
   description: Schema.NullOr(Schema.String),
   privacy: Schema.String,
-  members_count: Schema.Finite,
-  repos_count: Schema.Finite,
+  // Absent from the team LIST endpoint; present only on the team detail.
+  members_count: Schema.optional(Schema.Finite),
+  repos_count: Schema.optional(Schema.Finite),
 })
 const decodeTeams = Schema.decodeUnknownSync(Schema.Array(TeamRaw))
 
@@ -294,8 +307,8 @@ const toTeam = (team: typeof TeamRaw.Type): OrgTeam => ({
   slug: team.slug,
   description: team.description ?? '-',
   privacy: team.privacy,
-  members_count: team.members_count,
-  repos_count: team.repos_count,
+  members_count: team.members_count ?? '-',
+  repos_count: team.repos_count ?? '-',
 })
 
 // The authenticated-user payload `info` reads: login, optional display name, and

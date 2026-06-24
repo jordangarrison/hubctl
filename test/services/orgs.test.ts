@@ -13,15 +13,14 @@ import { FakeGithub } from '../helpers/fake-github'
 // each payload to mirror the Ruby `Hubctl::Orgs` data, and surfaces typed
 // GithubErrors in the `E` channel.
 
+// The real `GET /user/orgs` payload is MINIMAL: login/id/description/url and a
+// set of *_url fields — NO per-org counts and NO html_url (those live only on the
+// `GET /orgs/{org}` detail). The fixture mirrors that so the decode stays honest.
 const orgSummary = {
   login: 'acme',
   id: 42,
   description: 'Acme Corp',
-  public_repos: 10,
-  public_gists: 2,
-  followers: 100,
-  following: 5,
-  html_url: 'https://github.com/acme',
+  url: 'https://api.github.com/orgs/acme',
 }
 
 const orgDetail = {
@@ -32,7 +31,6 @@ const orgDetail = {
   blog: 'https://acme.example',
   location: 'Springfield',
   email: 'hi@acme.example',
-  bio: 'We make everything',
   description: 'Acme Corp',
   public_repos: 10,
   public_gists: 2,
@@ -68,13 +66,13 @@ const repoPayload = {
   updated_at: '2021-06-01T00:00:00Z',
 }
 
+// The team LIST endpoint (`GET /orgs/{org}/teams`) omits members_count/repos_count
+// (only the team detail returns them); the fixture mirrors that.
 const teamPayload = {
   name: 'Core',
   slug: 'core',
   description: 'Core team',
   privacy: 'closed',
-  members_count: 8,
-  repos_count: 4,
 }
 
 const currentUser = {
@@ -90,15 +88,17 @@ describe('Orgs service', () => {
         const orgs = yield* Orgs
         const result = yield* orgs.list
         expect(result).toHaveLength(1)
+        // The list endpoint omits the counts and html_url, so they surface as null
+        // (the Ruby read the absent keys and rendered nil).
         expect(result[0]).toEqual({
           login: 'acme',
           id: 42,
           description: 'Acme Corp',
-          public_repos: 10,
-          public_gists: 2,
-          followers: 100,
-          following: 5,
-          url: 'https://github.com/acme',
+          public_repos: null,
+          public_gists: null,
+          followers: null,
+          following: null,
+          url: null,
         })
       }).pipe(
         Effect.provide(Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ routes: { 'GET /user/orgs': [orgSummary] } }))))
@@ -135,7 +135,7 @@ describe('Orgs service', () => {
           blog: 'https://acme.example',
           location: 'Springfield',
           email: 'hi@acme.example',
-          bio: 'We make everything',
+          bio: null,
           description: 'Acme Corp',
           public_repos: 10,
           public_gists: 2,
@@ -346,8 +346,8 @@ describe('Orgs service', () => {
           slug: 'core',
           description: 'Core team',
           privacy: 'closed',
-          members_count: 8,
-          repos_count: 4,
+          members_count: '-',
+          repos_count: '-',
         })
       }).pipe(
         Effect.provide(
