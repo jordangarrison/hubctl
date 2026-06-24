@@ -1,0 +1,227 @@
+name: ci
+
+# PR/push CI for hubctl. Complements release-please.yml (which only builds on
+# release). This workflow is the merge gate: the real `validate` + e2e +
+# install/build validation.
+#
+# Perf strategy: ONE consolidated validate chain per lane (not four separate
+# lint/format/typecheck/test jobs that would each re-pay install/Nix setup) plus
+# genuinely-independent slow legs (Nix package build, native build/e2e matrix)
+# split out to run in parallel. Two cache layers (bun install cache keyed on
+# bun.lock; /nix/store keyed on flake.lock+*.nix) keep warm runs fast.
+#
+# All tool versions are pinned to match the Nix flake so "versions match CI":
+# bun 1.3.0 (nixpkgs flake bun), ast-grep + fallow come from the flake devShell.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded PR runs to save minutes; never cancel main/release runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: a test/build CI needs no write scopes.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast PR feedback lane (pure Bun, no Nix realization cost). Runs
+  # format+lint+typecheck+test but DELIBERATELY EXCLUDES ast-grep, which is
+  # supplied only by the flake devShell. This is the early-exit accelerator;
+  # validate-nix below is the authoritative gate.
+  # ---------------------------------------------------------------------------
+  validate-fast:
+    name: validate-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # bun 1.3.0 matches the nixpkgs flake bun so the Bun and Nix lanes never
+      # skew. (Keep this literal in lockstep with the flake input when it bumps.)
+      # The action also caches the bun binary itself. Pinned to the v2 major;
+      # Dependabot keeps it current (see .github/dependabot.yml).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
+      # Cache the GLOBAL bun install cache (not node_modules): warming it is
+      # faster than restoring node_modules and re-runs the effect postinstall
+      # patches cleanly. Keyed on bun.lock so invalidation is exact.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      # NO --ignore-scripts: the postinstall `effect-language-service patch &&
+      # effect-tsgo patch` MUST run, or `tsgo --noEmit` is silently weakened.
+      - name: Install (frozen lockfile, runs effect patches)
+        run: bun install --frozen-lockfile
+
+      - name: Format (oxfmt --check)
+        run: bun run format
+      - name: Lint (oxlint)
+        run: bun run lint
+      - name: Typecheck (tsgo --noEmit)
+        run: bun run typecheck
+      - name: Test (vitest run)
+        run: bun run test
+
+  # ---------------------------------------------------------------------------
+  # Authoritative validate lane: runs the EXACT `bun run validate` inside the
+  # flake devShell so ast-grep runs at the flake-pinned version, then
+  # `fallow audit` separately (both are flake-only; fallow is x86_64-linux-only).
+  # Single ubuntu-x64 runner: full validate, ast-grep and fallow are all
+  # x86_64-linux-bound.
+  # ---------------------------------------------------------------------------
+  validate-nix:
+    name: validate-nix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # Determinate Nix, flakes-on-by-default.
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # /nix/store cache via the GitHub Actions cache — no external account or
+      # secret (works on PRs/forks), and avoids the deprecated magic-nix-cache's
+      # unpublished API. Keyed on flake.lock + every *.nix so a flake bump
+      # invalidates it. PR runs read the default-branch cache; post-merge main
+      # runs prime it for subsequent PRs. validate-nix and nix-build share this
+      # key so the second job restores a warm store. gc-before-save keeps the
+      # store under GitHub's 10 GB/repo LRU cap (re-tune gc-max-store after
+      # measuring the devShell closure with `nix path-info -Sh`).
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 129600 # 1.5 days, in seconds
+          purge-primary-key: never
+
+      # Realize the devShell closure once up front (so a cold miss is paid here,
+      # visibly, rather than buried in the validate step).
+      - name: Warm devShell closure
+        run: nix develop --command true
+
+      # Authoritative chain: install (with postinstall patches) + the full
+      # `bun run validate` (format/lint/typecheck/test/ast-grep), ast-grep
+      # resolved from the flake PATH.
+      - name: bun run validate (inside nix develop)
+        run: nix develop --command bash -c 'bun install --frozen-lockfile && bun run validate'
+
+      # Dead-code audit is a SEPARATE step (as in package.json), flake-only.
+      - name: fallow audit
+        run: nix develop --command bun run fallow
+
+  # ---------------------------------------------------------------------------
+  # Install/package path: `nix build .#hubctl` builds the makeWrapper-over-bun
+  # package and surfaces bunDeps fixed-output-derivation outputHash-vs-bun.lock
+  # drift as a hard hash-mismatch failure; `nix flake check` is a cheap eval gate
+  # over all flake outputs. Smoke-runs the wrapped binary. x86_64-linux only.
+  # ---------------------------------------------------------------------------
+  nix-build:
+    name: nix-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # Same key as validate-nix: restores a warm /nix/store.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 129600 # 1.5 days, in seconds
+          purge-primary-key: never
+
+      - name: nix build .#hubctl (FOD hash drift surfaces here)
+        run: nix build .#hubctl
+
+      - name: Smoke-run packaged binary
+        run: ./result/bin/hubctl version
+
+      - name: nix flake check (eval gate over package + devShell)
+        run: nix flake check
+
+  # ---------------------------------------------------------------------------
+  # Build + native execution matrix. `bun build --compile` output is NOT portable
+  # across OS, so each native binary must be built AND smoke-tested on its own OS
+  # runner. The e2e suite is hermetic (dummy token + 127.0.0.1 mock GitHub
+  # server, no secrets) so it runs identically on both. macos-15 is a PINNED
+  # arm64 label (not macos-latest, which floats); re-pin when GitHub retires it.
+  # frozen-lockfile install on both OSes catches arch-specific
+  # optionalDependency lockfile problems.
+  # ---------------------------------------------------------------------------
+  build-e2e:
+    name: build-e2e
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      # frozen-lockfile on BOTH ubuntu-x64 and macos-arm64. NO --ignore-scripts:
+      # the compile path also depends on the effect patches being applied.
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      # Host-native standalone binary -> dist/hubctl.
+      - name: Build host binary (build:local)
+        run: bun run build:local
+
+      # Native-OS execution smoke test (proves the compiled binary RUNS, not just
+      # compiles). `version` exits 0 with no token (emits auth:null).
+      - name: Smoke-run host binary
+        run: |
+          ./dist/hubctl version
+          ./dist/hubctl --help
+
+      # Hermetic e2e: vitest drives the compiled dist/hubctl against a local mock
+      # GitHub server with a dummy token. No secrets required.
+      - name: e2e suite
+        run: bun run test:e2e
+
+      # Release-shaped cross-compiled artifacts, produced once (ubuntu only), for
+      # inspection. release-please.yml owns the real release upload.
+      - name: Cross-compile release artifacts
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run build
+      - name: Upload cross-compiled binaries
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hubctl-binaries
+          path: |
+            dist/hubctl-linux-x64
+            dist/hubctl-darwin-arm64
+          if-no-files-found: error
