@@ -2,6 +2,8 @@ import * as Data from 'effect/Data'
 import * as O from 'effect/Option'
 import * as P from 'effect/Predicate'
 
+import type { DecodeError } from '../schema/decode'
+
 // Typed error ADT for the GitHub layer. Each carries a human `message` and an
 // actionable `fix`; `toGithubError` maps an Octokit-shaped failure (numeric
 // `.status` + `.response.headers`) to the right tagged error. A top-level
@@ -38,7 +40,14 @@ export class ValidationError extends Data.TaggedError('ValidationError')<{
 }> {}
 /* eslint-enable effect/avoid-data-tagged-error */
 
-export type GithubError = AuthError | NotFoundError | ForbiddenError | RateLimitError | ValidationError
+// `DecodeError` (from the shared schema/decode helper) is admitted into the
+// union so every github-backed service method — which already declares
+// `Effect<…, GithubError>` — can surface a schema mismatch as a typed failure
+// (rendered as an `ok:false` envelope) instead of throwing an uncaught defect.
+// `toGithubError` never produces one; it arises only from `decode` at the
+// service boundary. A decode failure genuinely IS a way a github-backed call
+// can fail, so the union stays honest.
+export type GithubError = AuthError | NotFoundError | ForbiddenError | RateLimitError | ValidationError | DecodeError
 
 // Read a property off an unknown value without type assertions. Returns
 // `Option` so absence (non-object or missing key) is explicit.
