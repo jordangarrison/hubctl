@@ -70,6 +70,32 @@ describe('repos command', () => {
       })
     )
 
+    it.effect('renders an ok:false decode_error envelope (no stack-trace crash) when a row mismatches the schema', () =>
+      Effect.gen(function* () {
+        // A realistic shape drift: a repo object missing the required `full_name`
+        // string. Before the decode hardening this threw an uncaught defect and
+        // dumped a stack trace; now it must render the standard envelope.
+        const brokenRepo = {
+          name: 'hello',
+          private: false,
+          description: 'A test repo',
+          language: 'TypeScript',
+          stargazers_count: 42,
+          forks_count: 3,
+          updated_at: '2021-01-01T00:00:00Z',
+        }
+        const env = yield* runCli(reposCommand, ['list'], {
+          github: { routes: { 'GET /user/repos': [brokenRepo] } },
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('repos.list')
+        expect(env.result).toBeNull()
+        expect(env.error?.code).toBe('decode_error')
+        expect(env.fix).toContain('report')
+      })
+    )
+
     it.effect('uses the org route when --org is passed', () =>
       Effect.gen(function* () {
         const env = yield* runCli(reposCommand, ['list', '--org', 'acme'], {
