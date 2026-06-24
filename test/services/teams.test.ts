@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { Teams } from '../../src/services/teams'
 import { FakeGithub } from '../helpers/fake-github'
 
@@ -177,6 +178,43 @@ describe('Teams service', () => {
       }).pipe(
         Effect.provide(
           Teams.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/teams/{team_slug}': 404 } })))
+        )
+      )
+    )
+
+    // members_count is a required Schema.Finite on the detail schema; a payload
+    // that omits it must fail in the typed E channel as a DecodeError, NOT throw
+    // an uncaught defect that escapes the envelope.
+    it.effect('a mismatched team detail fails as a DecodeError, not a thrown defect', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.show('acme', 'core'))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof DecodeError)
+        expect(error.code).toBe('decode_error')
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams/{team_slug}': {
+                    id: 7,
+                    name: 'Core',
+                    slug: 'core',
+                    description: 'Core maintainers',
+                    privacy: 'closed',
+                    permission: 'push',
+                    repos_count: 12,
+                    created_at: '2020-01-01T00:00:00Z',
+                    updated_at: '2021-02-02T00:00:00Z',
+                    html_url: 'https://github.com/orgs/acme/teams/core',
+                  },
+                },
+              })
+            )
+          )
         )
       )
     )

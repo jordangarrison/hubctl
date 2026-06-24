@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Domain service for the `repos` command group. Depends only on `Github`;
 // mirrors the data shaping in lib/hubctl/repos.rb so the JSON envelope matches
@@ -157,7 +158,7 @@ const RepoSummary = Schema.Struct({
   updated_at: Schema.String,
 })
 
-const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(RepoSummary))
+const decodeSummaries = decode(Schema.Array(RepoSummary), 'repos list item')
 
 // Full repo payload for `show`. `description`/`language` stay nullable on the
 // wire (the detail view shows them verbatim, unlike the list's '-' default).
@@ -185,7 +186,7 @@ const RepoFull = Schema.Struct({
   html_url: Schema.String,
 })
 
-const decodeFull = Schema.decodeUnknownSync(RepoFull)
+const decodeFull = decode(RepoFull, 'repo detail')
 
 // Created-repo summary fields (lib/hubctl/repos.rb#create).
 const RepoCreated = Schema.Struct({
@@ -197,11 +198,11 @@ const RepoCreated = Schema.Struct({
   html_url: Schema.String,
 })
 
-const decodeCreated = Schema.decodeUnknownSync(RepoCreated)
+const decodeCreated = decode(RepoCreated, 'created repo')
 
 // Just the `clone_url` the `clone` flow needs from the repo payload.
 const RepoCloneUrl = Schema.Struct({ clone_url: Schema.String })
-const decodeCloneUrl = Schema.decodeUnknownSync(RepoCloneUrl)
+const decodeCloneUrl = decode(RepoCloneUrl, 'repo clone url')
 
 // Archive confirmation fields read back from the PATCH response.
 const RepoArchived = Schema.Struct({
@@ -209,11 +210,11 @@ const RepoArchived = Schema.Struct({
   // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
   archived: Schema.Boolean,
 })
-const decodeArchived = Schema.decodeUnknownSync(RepoArchived)
+const decodeArchived = decode(RepoArchived, 'archive confirmation')
 
 // The dedicated topics endpoint returns/accepts `{ names: string[] }`.
 const Topics = Schema.Struct({ names: Schema.Array(Schema.String) })
-const decodeTopics = Schema.decodeUnknownSync(Topics)
+const decodeTopics = decode(Topics, 'repo topics')
 
 // Whether any modification was requested (vs a plain list).
 const hasMod = (mod: TopicsMod): boolean => mod.set !== undefined || mod.add !== undefined || mod.remove !== undefined
@@ -318,7 +319,7 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
         const route = O.isSome(org) ? 'GET /orgs/{org}/repos' : 'GET /user/repos'
         const params = O.isSome(org) ? { org: org.value, ...listParams(input) } : listParams(input)
         return github.paginate(route, params).pipe(
-          Effect.map(decodeSummaries),
+          Effect.flatMap(decodeSummaries),
           Effect.map((repos) => repos.map(toListItem)),
           Effect.withSpan('Repos.list')
         )
@@ -327,7 +328,7 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
       const show: ReposShape['show'] = (repo) =>
         github
           .request('GET /repos/{owner}/{repo}', splitRepo(repo))
-          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Repos.show'))
+          .pipe(Effect.flatMap(decodeFull), Effect.map(toDetail), Effect.withSpan('Repos.show'))
 
       const create: ReposShape['create'] = (name, input) => {
         const org = O.fromNullishOr(input.org)
@@ -335,12 +336,12 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
         const effect = O.isSome(org)
           ? github.request('POST /orgs/{org}/repos', { org: org.value, ...body })
           : github.request('POST /user/repos', body)
-        return effect.pipe(Effect.map(decodeCreated), Effect.withSpan('Repos.create'))
+        return effect.pipe(Effect.flatMap(decodeCreated), Effect.withSpan('Repos.create'))
       }
 
       const clone: ReposShape['clone'] = (repo, input) =>
         github.request('GET /repos/{owner}/{repo}', splitRepo(repo)).pipe(
-          Effect.map(decodeCloneUrl),
+          Effect.flatMap(decodeCloneUrl),
           Effect.flatMap((detail) => {
             const args = cloneArgs(detail.clone_url, input)
             const targetPath = input.path ?? basename(repo)
@@ -376,13 +377,14 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
       const archive: ReposShape['archive'] = (repo) =>
         github
           .request('PATCH /repos/{owner}/{repo}', { ...splitRepo(repo), archived: true })
-          .pipe(Effect.map(decodeArchived), Effect.withSpan('Repos.archive'))
+          .pipe(Effect.flatMap(decodeArchived), Effect.withSpan('Repos.archive'))
 
       const topics: ReposShape['topics'] = (repo, mod) => {
         const params = splitRepo(repo)
-        const current = github
-          .request('GET /repos/{owner}/{repo}/topics', params)
-          .pipe(Effect.map((raw) => decodeTopics(raw).names))
+        const current = github.request('GET /repos/{owner}/{repo}/topics', params).pipe(
+          Effect.flatMap(decodeTopics),
+          Effect.map((t) => t.names)
+        )
 
         if (!hasMod(mod)) {
           return current.pipe(
@@ -395,7 +397,8 @@ export class Repos extends Context.Service<Repos, ReposShape>()('Repos') {
           Effect.flatMap((names) =>
             github.request('PUT /repos/{owner}/{repo}/topics', { ...params, names: mergeTopics(names, mod) })
           ),
-          Effect.map((raw) => ({ topics: decodeTopics(raw).names, modified: true })),
+          Effect.flatMap(decodeTopics),
+          Effect.map((t) => ({ topics: t.names, modified: true })),
           Effect.withSpan('Repos.topics')
         )
       }

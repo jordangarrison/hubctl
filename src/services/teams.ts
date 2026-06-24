@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Domain service for the `teams` command group. Depends only on `Github`;
 // mirrors the data shaping in lib/hubctl/teams.rb so the JSON envelope matches
@@ -109,7 +110,7 @@ const TeamSummary = Schema.Struct({
   members_count: Schema.optional(Schema.Finite),
   repos_count: Schema.optional(Schema.Finite),
 })
-const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(TeamSummary))
+const decodeSummaries = decode(Schema.Array(TeamSummary), 'teams list item')
 
 const toListItem = (team: typeof TeamSummary.Type): TeamListItem => ({
   id: team.id,
@@ -138,7 +139,7 @@ const TeamFull = Schema.Struct({
   updated_at: Schema.String,
   html_url: Schema.String,
 })
-const decodeFull = Schema.decodeUnknownSync(TeamFull)
+const decodeFull = decode(TeamFull, 'team detail')
 
 const toDetail = (team: typeof TeamFull.Type): TeamDetail => ({
   id: team.id,
@@ -162,7 +163,7 @@ const TeamCreated = Schema.Struct({
   privacy: Schema.String,
   permission: Schema.String,
 })
-const decodeCreated = Schema.decodeUnknownSync(TeamCreated)
+const decodeCreated = decode(TeamCreated, 'created team')
 
 // Build the create-team request body, mirroring the Ruby `team_options`
 // assembly: always send `name`/`privacy`/`permission`, and only include the
@@ -184,7 +185,7 @@ const Member = Schema.Struct({
   site_admin: Schema.Boolean,
   html_url: Schema.String,
 })
-const decodeMembers = Schema.decodeUnknownSync(Schema.Array(Member))
+const decodeMembers = decode(Schema.Array(Member), 'team member')
 
 const toMember = (member: typeof Member.Type): TeamMember => ({
   login: member.login,
@@ -196,7 +197,7 @@ const toMember = (member: typeof Member.Type): TeamMember => ({
 
 // The membership endpoint response carries the resulting `state`/`role`.
 const Membership = Schema.Struct({ state: Schema.String, role: Schema.String })
-const decodeMembership = Schema.decodeUnknownSync(Membership)
+const decodeMembership = decode(Membership, 'team membership')
 
 export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
   static readonly layer: Layer.Layer<Teams, never, Github> = Layer.effect(
@@ -206,7 +207,7 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
 
       const list: TeamsShape['list'] = (org) =>
         github.paginate('GET /orgs/{org}/teams', { org }).pipe(
-          Effect.map(decodeSummaries),
+          Effect.flatMap(decodeSummaries),
           Effect.map((teams) => teams.map(toListItem)),
           Effect.withSpan('Teams.list')
         )
@@ -218,16 +219,16 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
       const show: TeamsShape['show'] = (org, team) =>
         github
           .request('GET /orgs/{org}/teams/{team_slug}', { org, team_slug: team })
-          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Teams.show'))
+          .pipe(Effect.flatMap(decodeFull), Effect.map(toDetail), Effect.withSpan('Teams.show'))
 
       const create: TeamsShape['create'] = (org, name, input) =>
         github
           .request('POST /orgs/{org}/teams', { org, ...createBody(name, input) })
-          .pipe(Effect.map(decodeCreated), Effect.withSpan('Teams.create'))
+          .pipe(Effect.flatMap(decodeCreated), Effect.withSpan('Teams.create'))
 
       const members: TeamsShape['members'] = (org, team) =>
         github.paginate('GET /orgs/{org}/teams/{team_slug}/members', { org, team_slug: team }).pipe(
-          Effect.map(decodeMembers),
+          Effect.flatMap(decodeMembers),
           Effect.map((list_) => list_.map(toMember)),
           Effect.withSpan('Teams.members')
         )
@@ -244,10 +245,14 @@ export class Teams extends Context.Service<Teams, TeamsShape>()('Teams') {
             role,
           })
           .pipe(
-            Effect.map((raw) => {
-              const membership = decodeMembership(raw)
-              return { team, user, role: membership.role, state: membership.state }
-            }),
+            Effect.flatMap((raw) =>
+              Effect.map(decodeMembership(raw), (membership) => ({
+                team,
+                user,
+                role: membership.role,
+                state: membership.state,
+              }))
+            ),
             Effect.withSpan('Teams.add')
           )
 

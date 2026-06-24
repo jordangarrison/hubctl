@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError, ValidationError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { Enterprise } from '../../src/services/enterprise'
 import { FakeGithub } from '../helpers/fake-github'
 import type { FakeGithubConfig } from '../helpers/fake-github'
@@ -526,6 +527,34 @@ describe('Enterprise service', () => {
             routes: {
               'GET /orgs/{org}': {
                 login: 'acme',
+                name: 'Acme Inc',
+                description: 'The Acme enterprise',
+                plan: { name: 'enterprise' },
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
+              },
+            },
+          })
+        )
+      )
+    )
+
+    it.effect('a mismatched org detail payload fails as a DecodeError, not a thrown defect', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const exit = yield* Effect.exit(ent.show(enterprise))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof DecodeError)
+        expect(error.code).toBe('decode_error')
+      }).pipe(
+        Effect.provide(
+          withRoutes({
+            routes: {
+              // `login` is a required non-null string; null breaks the schema so
+              // the decode must surface a typed DecodeError, not a thrown defect.
+              'GET /orgs/{org}': {
+                login: null,
                 name: 'Acme Inc',
                 description: 'The Acme enterprise',
                 plan: { name: 'enterprise' },

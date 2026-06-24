@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Domain service for the `users` command group. Depends only on `Github`;
 // mirrors the data shaping in lib/hubctl/users.rb so the JSON envelope matches
@@ -118,7 +119,7 @@ const UserFull = Schema.Struct({
   updated_at: Schema.String,
   html_url: Schema.String,
 })
-const decodeFull = Schema.decodeUnknownSync(UserFull)
+const decodeFull = decode(UserFull, 'user detail')
 
 const toDetail = (user: typeof UserFull.Type): UserDetail => ({
   login: user.login,
@@ -150,7 +151,7 @@ const CurrentUser = Schema.Struct({
   collaborators: Schema.optional(Schema.NullOr(Schema.Finite)),
   disk_usage: Schema.optional(Schema.NullOr(Schema.Finite)),
 })
-const decodeCurrent = Schema.decodeUnknownSync(CurrentUser)
+const decodeCurrent = decode(CurrentUser, 'current user')
 
 const toWhoami = (user: typeof CurrentUser.Type): WhoamiInfo => ({
   login: user.login,
@@ -173,7 +174,7 @@ const Member = Schema.Struct({
   site_admin: Schema.Boolean,
   html_url: Schema.String,
 })
-const decodeMembers = Schema.decodeUnknownSync(Schema.Array(Member))
+const decodeMembers = decode(Schema.Array(Member), 'org members list')
 
 const toListItem = (member: typeof Member.Type): UserListItem => ({
   login: member.login,
@@ -190,7 +191,7 @@ const listParams = (input: ListInput): Record<string, unknown> =>
 
 // The user-lookup payload for inviting by username (only the numeric id matters).
 const UserId = Schema.Struct({ id: Schema.Finite })
-const decodeUserId = Schema.decodeUnknownSync(UserId)
+const decodeUserId = decode(UserId, 'user id lookup')
 
 // The invitation response carries the new invitation id, the membership `role`,
 // and the `inviter` (a user object whose `login` the Ruby surfaces). `role`/
@@ -200,7 +201,7 @@ const Invitation = Schema.Struct({
   role: Schema.optional(Schema.NullOr(Schema.String)),
   inviter: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
 })
-const decodeInvitation = Schema.decodeUnknownSync(Invitation)
+const decodeInvitation = decode(Invitation, 'invitation')
 
 // Extra invitation body fields (role/team_ids) only included when supplied,
 // mirroring the Ruby's options merge.
@@ -222,15 +223,15 @@ export class Users extends Context.Service<Users, UsersShape>()('Users') {
       const show: UsersShape['show'] = (username) =>
         github
           .request('GET /users/{username}', { username })
-          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Users.show'))
+          .pipe(Effect.flatMap(decodeFull), Effect.map(toDetail), Effect.withSpan('Users.show'))
 
       const whoami: UsersShape['whoami'] = github
         .request('GET /user')
-        .pipe(Effect.map(decodeCurrent), Effect.map(toWhoami), Effect.withSpan('Users.whoami'))
+        .pipe(Effect.flatMap(decodeCurrent), Effect.map(toWhoami), Effect.withSpan('Users.whoami'))
 
       const list: UsersShape['list'] = (org, input) =>
         github.paginate('GET /orgs/{org}/members', { org, ...listParams(input) }).pipe(
-          Effect.map(decodeMembers),
+          Effect.flatMap(decodeMembers),
           Effect.map((members) => members.map(toListItem)),
           Effect.withSpan('Users.list')
         )
@@ -241,18 +242,17 @@ export class Users extends Context.Service<Users, UsersShape>()('Users') {
           ? Effect.succeed({ email: target, ...options })
           : github
               .request('GET /users/{username}', { username: target })
-              .pipe(Effect.map((raw) => ({ invitee_id: decodeUserId(raw).id, ...options })))
+              .pipe(Effect.flatMap((raw) => Effect.map(decodeUserId(raw), (u) => ({ invitee_id: u.id, ...options }))))
         return body.pipe(
           Effect.flatMap((payload) => github.request('POST /orgs/{org}/invitations', { org, ...payload })),
-          Effect.map((raw) => {
-            const invitation = decodeInvitation(raw)
-            return {
+          Effect.flatMap((raw) =>
+            Effect.map(decodeInvitation(raw), (invitation) => ({
               id: invitation.id,
               invited: target,
               role: invitation.role ?? null,
               inviter: invitation.inviter?.login ?? null,
-            }
-          }),
+            }))
+          ),
           Effect.withSpan('Users.invite')
         )
       }

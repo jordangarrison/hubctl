@@ -10,6 +10,7 @@ import * as Schema from 'effect/Schema'
 import { Github } from '../github/client'
 import { ValidationError } from '../github/errors'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Domain service for the `enterprise` command group. This file currently
 // implements the `billing` path (Task 7.1's regression baseline); the remaining
@@ -33,7 +34,7 @@ const BillingUsage = Schema.Struct({
   usageItems: Schema.optional(Schema.Array(UsageItem)),
 })
 
-const decodeBillingUsage = Schema.decodeUnknownSync(BillingUsage)
+const decodeBillingUsage = decode(BillingUsage, 'enterprise billing usage')
 
 type UsageItem = typeof UsageItem.Type
 
@@ -539,7 +540,7 @@ const EnterpriseOrgRaw = Schema.Struct({
   created_at: Schema.String,
   html_url: Schema.String,
 })
-const decodeEnterpriseOrgs = Schema.decodeUnknownSync(Schema.Array(EnterpriseOrgRaw))
+const decodeEnterpriseOrgs = decode(Schema.Array(EnterpriseOrgRaw), 'enterprise orgs list')
 
 const toEnterpriseOrg = (org: typeof EnterpriseOrgRaw.Type): EnterpriseOrg => ({
   login: org.login,
@@ -557,7 +558,7 @@ const toEnterpriseOrg = (org: typeof EnterpriseOrgRaw.Type): EnterpriseOrg => ({
 
 // Created-org summary fields (lib/hubctl/enterprise.rb#create_org).
 const CreatedOrgRaw = Schema.Struct({ id: Schema.Finite, login: Schema.String, html_url: Schema.String })
-const decodeCreatedOrg = Schema.decodeUnknownSync(CreatedOrgRaw)
+const decodeCreatedOrg = decode(CreatedOrgRaw, 'created org')
 
 const toCreatedOrg = (org: typeof CreatedOrgRaw.Type): CreatedOrg => ({
   id: org.id,
@@ -578,7 +579,7 @@ const createOrgBody = (login: string, input: CreateOrgInput): Record<string, unk
 // Decode an arbitrary JSON object into a plain record (the raw billing payloads
 // the Ruby emits verbatim).
 const RawObject = Schema.Record(Schema.String, Schema.Unknown)
-const decodeRawObject = Schema.decodeUnknownSync(RawObject)
+const decodeRawObject = decode(RawObject, 'raw billing object')
 
 // === Detail (show) helpers ===
 
@@ -592,7 +593,7 @@ const EnterpriseDetailRaw = Schema.Struct({
   created_at: Schema.String,
   updated_at: Schema.String,
 })
-const decodeEnterpriseDetail = Schema.decodeUnknownSync(EnterpriseDetailRaw)
+const decodeEnterpriseDetail = decode(EnterpriseDetailRaw, 'enterprise detail')
 
 // === Stats helpers ===
 
@@ -618,7 +619,7 @@ const StatsRaw = Schema.Struct({
   ),
   gists: Schema.optional(Schema.NullOr(Schema.Struct({ total_gists: Num, private_gists: Num, public_gists: Num }))),
 })
-const decodeStats = Schema.decodeUnknownSync(StatsRaw)
+const decodeStats = decode(StatsRaw, 'enterprise stats')
 
 // Emit `{ [key]: shape(section) }` only when the section is present, otherwise
 // an empty fragment — the spread builds the labeled report (present sections
@@ -693,8 +694,8 @@ const SsoAuthRaw = Schema.Struct({
   credential_expires_at: Schema.optional(Schema.NullOr(Schema.String)),
   organization_count: Schema.optional(Schema.NullOr(Schema.Finite)),
 })
-const decodeSsoAuths = Schema.decodeUnknownSync(Schema.Array(SsoAuthRaw))
-const decodeSsoAuth = Schema.decodeUnknownSync(SsoAuthRaw)
+const decodeSsoAuths = decode(Schema.Array(SsoAuthRaw), 'sso authorizations list')
+const decodeSsoAuth = decode(SsoAuthRaw, 'sso authorization')
 
 const toSsoAuthorization = (auth: typeof SsoAuthRaw.Type): SsoAuthorization => ({
   login: auth.login ?? null,
@@ -744,7 +745,7 @@ const AuditEntryRaw = Schema.Struct({
   created_at: Schema.optional(Schema.NullOr(Schema.Finite)),
   document_id: Schema.optional(Schema.NullOr(Schema.String)),
 })
-const decodeAuditEntries = Schema.decodeUnknownSync(Schema.Array(AuditEntryRaw))
+const decodeAuditEntries = decode(Schema.Array(AuditEntryRaw), 'audit log entries')
 
 const toAuditEntry = (entry: typeof AuditEntryRaw.Type): AuditLogEntry => ({
   timestamp: entry.timestamp ?? null,
@@ -784,7 +785,7 @@ const ConsumedUser = Schema.Struct({
 const ConsumedLicenses = Schema.Struct({
   users: Schema.optional(Schema.NullOr(Schema.Array(ConsumedUser))),
 })
-const decodeConsumedLicenses = Schema.decodeUnknownSync(ConsumedLicenses)
+const decodeConsumedLicenses = decode(ConsumedLicenses, 'consumed licenses page')
 
 type ConsumedUser = typeof ConsumedUser.Type
 
@@ -855,7 +856,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
 
       const billing: EnterpriseShape['billing'] = (enterprise) =>
         github.request('GET /enterprises/{enterprise}/settings/billing/usage', { enterprise }).pipe(
-          Effect.map(decodeBillingUsage),
+          Effect.flatMap(decodeBillingUsage),
           Effect.map((usage): BillingResult => {
             const items = usage.usageItems ?? []
             return items.length === 0 ? { kind: 'empty', enterprise } : summarize(enterprise, items)
@@ -881,7 +882,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
               page,
             })
             .pipe(
-              Effect.map(decodeConsumedLicenses),
+              Effect.flatMap(decodeConsumedLicenses),
               Effect.map((decoded) => decoded.users ?? []),
               Effect.flatMap((users) => {
                 const next = [...acc, ...users]
@@ -903,16 +904,16 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
       const packagesBilling: EnterpriseShape['packagesBilling'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/billing/packages', { enterprise })
-          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.packagesBilling'))
+          .pipe(Effect.flatMap(decodeRawObject), Effect.withSpan('Enterprise.packagesBilling'))
 
       const sharedStorageBilling: EnterpriseShape['sharedStorageBilling'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/billing/shared-storage', { enterprise })
-          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.sharedStorageBilling'))
+          .pipe(Effect.flatMap(decodeRawObject), Effect.withSpan('Enterprise.sharedStorageBilling'))
 
       const listSsoAuthorizations: EnterpriseShape['listSsoAuthorizations'] = (enterprise) =>
         github.paginate('GET /enterprises/{enterprise}/sso/authorizations', { enterprise }).pipe(
-          Effect.map(decodeSsoAuths),
+          Effect.flatMap(decodeSsoAuths),
           Effect.map((auths) => auths.map(toSsoAuthorization)),
           Effect.withSpan('Enterprise.listSsoAuthorizations')
         )
@@ -921,7 +922,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         github
           .request('GET /enterprises/{enterprise}/sso/authorizations/{login}', { enterprise, login })
           .pipe(
-            Effect.map(decodeSsoAuth),
+            Effect.flatMap(decodeSsoAuth),
             Effect.map(toSsoAuthorizationDetail),
             Effect.withSpan('Enterprise.showSsoAuthorization')
           )
@@ -933,7 +934,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
 
       const auditLog: EnterpriseShape['auditLog'] = (enterprise, input) =>
         github.paginate('GET /enterprises/{enterprise}/audit-log', { enterprise, ...auditParams(input) }).pipe(
-          Effect.map(decodeAuditEntries),
+          Effect.flatMap(decodeAuditEntries),
           Effect.map((entries) => entries.map(toAuditEntry)),
           Effect.withSpan('Enterprise.auditLog')
         )
@@ -941,12 +942,12 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
       const consumedLicenses: EnterpriseShape['consumedLicenses'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/consumed-licenses', { enterprise })
-          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.consumedLicenses'))
+          .pipe(Effect.flatMap(decodeRawObject), Effect.withSpan('Enterprise.consumedLicenses'))
 
       const stats: EnterpriseShape['stats'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/stats/all', { enterprise })
-          .pipe(Effect.map(decodeStats), Effect.map(toStats), Effect.withSpan('Enterprise.stats'))
+          .pipe(Effect.flatMap(decodeStats), Effect.map(toStats), Effect.withSpan('Enterprise.stats'))
 
       // Enterprise Cloud exposes no `/enterprises/{enterprise}` detail endpoint;
       // resolve via `GET /orgs/{org}` and require `plan.name == 'enterprise'`
@@ -954,7 +955,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
       // otherwise.
       const show: EnterpriseShape['show'] = (enterprise) =>
         github.request('GET /orgs/{org}', { org: enterprise }).pipe(
-          Effect.map(decodeEnterpriseDetail),
+          Effect.flatMap(decodeEnterpriseDetail),
           Effect.flatMap((org) =>
             org.plan?.name === 'enterprise'
               ? Effect.succeed<EnterpriseDetail>({
@@ -978,7 +979,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
       const securityAnalysis: EnterpriseShape['securityAnalysis'] = (enterprise) =>
         github
           .request('GET /enterprises/{enterprise}/code_security_analysis', { enterprise })
-          .pipe(Effect.map(decodeRawObject), Effect.withSpan('Enterprise.securityAnalysis'))
+          .pipe(Effect.flatMap(decodeRawObject), Effect.withSpan('Enterprise.securityAnalysis'))
 
       const updateSecurityAnalysis: EnterpriseShape['updateSecurityAnalysis'] = (enterprise, input) =>
         github
@@ -1011,7 +1012,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
             ...(input.perPage === undefined ? {} : { per_page: input.perPage }),
           })
           .pipe(
-            Effect.map(decodeEnterpriseOrgs),
+            Effect.flatMap(decodeEnterpriseOrgs),
             Effect.map((orgs) => orgs.map(toEnterpriseOrg)),
             Effect.withSpan('Enterprise.organizations')
           )
@@ -1020,7 +1021,7 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
         github
           .request('POST /enterprises/{enterprise}/organizations', { enterprise, ...createOrgBody(login, input) })
           .pipe(
-            Effect.map(decodeCreatedOrg),
+            Effect.flatMap(decodeCreatedOrg),
             Effect.map(toCreatedOrg),
             Effect.withSpan('Enterprise.createOrganization')
           )

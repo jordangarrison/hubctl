@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { AuthError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { Auth } from '../../src/services/auth'
 import { FakeGithub } from '../helpers/fake-github'
 
@@ -70,5 +71,32 @@ describe('Auth service', () => {
       expect(error).toBeInstanceOf(AuthError)
       expect(error?._tag).toBe('AuthError')
     }).pipe(Effect.provide(unauthorizedAuth))
+  )
+
+  // A rate-limit payload whose required `rate.limit` is null (the rest of the
+  // shape valid) must fail through the typed `E` channel as a DecodeError, not
+  // escape as a thrown defect from a synchronous decode.
+  const mismatchedRateAuth = Auth.layer.pipe(
+    Layer.provide(
+      FakeGithub.layer({
+        routes: {
+          'GET /user': { login: 'octocat', name: 'The Octocat', id: 583_231 },
+          'GET /rate_limit': {
+            rate: { limit: null, remaining: 4999, reset: 1_700_000_000, used: 1 },
+          },
+        },
+      })
+    )
+  )
+
+  it.effect('a mismatched rate-limit payload fails as a DecodeError, not a thrown defect', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth
+      const exit = yield* Effect.exit(auth.status)
+      expect(Exit.isFailure(exit)).toBe(true)
+      const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+      assert(error instanceof DecodeError)
+      expect(error.code).toBe('decode_error')
+    }).pipe(Effect.provide(mismatchedRateAuth))
   )
 })

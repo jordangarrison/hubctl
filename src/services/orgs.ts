@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Domain service for the `orgs` command group. Depends only on `Github`;
 // mirrors the data shaping in lib/hubctl/orgs.rb so the JSON envelope matches
@@ -158,7 +159,7 @@ const OrgSummary = Schema.Struct({
   following: Schema.optional(Schema.NullOr(Schema.Finite)),
   html_url: Schema.optional(Schema.NullOr(Schema.String)),
 })
-const decodeSummaries = Schema.decodeUnknownSync(Schema.Array(OrgSummary))
+const decodeSummaries = decode(Schema.Array(OrgSummary), 'org summary list')
 
 // Full org payload for `show`. Many fields are nullable on the GitHub API (and
 // only present for orgs the caller administers); the detail view shows them
@@ -189,7 +190,7 @@ const OrgFull = Schema.Struct({
   updated_at: Schema.String,
   html_url: Schema.String,
 })
-const decodeFull = Schema.decodeUnknownSync(OrgFull)
+const decodeFull = decode(OrgFull, 'org detail')
 
 const toDetail = (org: typeof OrgFull.Type): OrgDetail => ({
   login: org.login,
@@ -227,7 +228,7 @@ const Member = Schema.Struct({
   site_admin: Schema.Boolean,
   html_url: Schema.String,
 })
-const decodeMembers = Schema.decodeUnknownSync(Schema.Array(Member))
+const decodeMembers = decode(Schema.Array(Member), 'org member list')
 
 const toMember = (member: typeof Member.Type): OrgMember => ({
   login: member.login,
@@ -269,7 +270,7 @@ const OrgRepoRaw = Schema.Struct({
   forks_count: Schema.Finite,
   updated_at: Schema.String,
 })
-const decodeRepos = Schema.decodeUnknownSync(Schema.Array(OrgRepoRaw))
+const decodeRepos = decode(Schema.Array(OrgRepoRaw), 'org repo list')
 
 const toRepo = (repo: typeof OrgRepoRaw.Type): OrgRepo => ({
   name: repo.name,
@@ -300,7 +301,7 @@ const TeamRaw = Schema.Struct({
   members_count: Schema.optional(Schema.Finite),
   repos_count: Schema.optional(Schema.Finite),
 })
-const decodeTeams = Schema.decodeUnknownSync(Schema.Array(TeamRaw))
+const decodeTeams = decode(Schema.Array(TeamRaw), 'org team list')
 
 const toTeam = (team: typeof TeamRaw.Type): OrgTeam => ({
   name: team.name,
@@ -318,7 +319,7 @@ const CurrentUser = Schema.Struct({
   name: Schema.optional(Schema.NullOr(Schema.String)),
   plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
 })
-const decodeCurrentUser = Schema.decodeUnknownSync(CurrentUser)
+const decodeCurrentUser = decode(CurrentUser, 'current user')
 
 // Number each membership and default a missing description to the Ruby's
 // 'No description' marker (lib/hubctl/orgs.rb#info).
@@ -335,7 +336,7 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
       const github = yield* Github
 
       const list: OrgsShape['list'] = github.paginate('GET /user/orgs').pipe(
-        Effect.map(decodeSummaries),
+        Effect.flatMap(decodeSummaries),
         Effect.map((orgs) => orgs.map(toListItem)),
         Effect.withSpan('Orgs.list')
       )
@@ -343,40 +344,44 @@ export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
       const show: OrgsShape['show'] = (org) =>
         github
           .request('GET /orgs/{org}', { org })
-          .pipe(Effect.map(decodeFull), Effect.map(toDetail), Effect.withSpan('Orgs.show'))
+          .pipe(Effect.flatMap(decodeFull), Effect.map(toDetail), Effect.withSpan('Orgs.show'))
 
       const members: OrgsShape['members'] = (org, input) =>
         github.paginate('GET /orgs/{org}/members', { org, ...memberParams(input) }).pipe(
-          Effect.map(decodeMembers),
+          Effect.flatMap(decodeMembers),
           Effect.map((list_) => list_.map(toMember)),
           Effect.withSpan('Orgs.members')
         )
 
       const repos: OrgsShape['repos'] = (org, input) =>
         github.paginate('GET /orgs/{org}/repos', { org, ...repoParams(input) }).pipe(
-          Effect.map(decodeRepos),
+          Effect.flatMap(decodeRepos),
           Effect.map((list_) => list_.map(toRepo)),
           Effect.withSpan('Orgs.repos')
         )
 
       const teams: OrgsShape['teams'] = (org) =>
         github.paginate('GET /orgs/{org}/teams', { org }).pipe(
-          Effect.map(decodeTeams),
+          Effect.flatMap(decodeTeams),
           Effect.map((list_) => list_.map(toTeam)),
           Effect.withSpan('Orgs.teams')
         )
 
-      const info: OrgsShape['info'] = github.request('GET /user').pipe(
-        Effect.flatMap((rawUser) =>
-          Effect.map(github.paginate('GET /user/orgs'), (rawOrgs) => {
-            const user = decodeCurrentUser(rawUser)
-            return {
+      // Sequence the two reads (GET /user then the org list), then decode both
+      // effectfully so a mismatch surfaces as a typed DecodeError (clean
+      // envelope) rather than a thrown defect.
+      const info: OrgsShape['info'] = Effect.all([github.request('GET /user'), github.paginate('GET /user/orgs')], {
+        concurrency: 1,
+      }).pipe(
+        Effect.flatMap(([rawUser, rawOrgs]) =>
+          Effect.all([decodeCurrentUser(rawUser), decodeSummaries(rawOrgs)], { concurrency: 1 }).pipe(
+            Effect.map(([user, orgs]) => ({
               login: user.login,
               name: user.name ?? null,
               plan: user.plan?.name ?? null,
-              organizations: decodeSummaries(rawOrgs).map(toMembership),
-            }
-          })
+              organizations: orgs.map(toMembership),
+            }))
+          )
         ),
         Effect.withSpan('Orgs.info')
       )

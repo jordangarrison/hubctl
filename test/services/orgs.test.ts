@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { Orgs } from '../../src/services/orgs'
 import { FakeGithub } from '../helpers/fake-github'
 
@@ -183,6 +184,23 @@ describe('Orgs service', () => {
         const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
         expect(error).toBeInstanceOf(NotFoundError)
       }).pipe(Effect.provide(Orgs.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}': 404 } })))))
+    )
+
+    it.effect('a mismatched org detail fails as a DecodeError, not a thrown defect', () =>
+      Effect.gen(function* () {
+        const orgs = yield* Orgs
+        const exit = yield* Effect.exit(orgs.show('acme'))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof DecodeError)
+        expect(error.code).toBe('decode_error')
+      }).pipe(
+        Effect.provide(
+          Orgs.layer.pipe(
+            Layer.provide(FakeGithub.layer({ routes: { 'GET /orgs/{org}': { ...orgDetail, created_at: null } } }))
+          )
+        )
+      )
     )
   })
 

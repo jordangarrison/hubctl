@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { Users } from '../../src/services/users'
 import { FakeGithub } from '../helpers/fake-github'
 
@@ -88,6 +89,25 @@ describe('Users service', () => {
                     params.username === 'octocat' ? userPayload : { ...userPayload, login: 'WRONG' },
                 },
               })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('a mismatched user payload fails as a DecodeError, not a thrown defect', () =>
+      Effect.gen(function* () {
+        const users = yield* Users
+        const exit = yield* Effect.exit(users.show('octocat'))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof DecodeError)
+        expect(error.code).toBe('decode_error')
+      }).pipe(
+        Effect.provide(
+          Users.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ routes: { 'GET /users/{username}': { ...userPayload, followers: null } } })
             )
           )
         )

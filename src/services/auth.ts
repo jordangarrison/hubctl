@@ -7,6 +7,7 @@ import * as Schema from 'effect/Schema'
 
 import { Github } from '../github/client'
 import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
 
 // Identity + rate-limit status for the current token. Depends only on `Github`:
 // `GET /user` yields the authenticated login/name (a 401 here flows through as
@@ -45,8 +46,8 @@ export interface AuthShape {
   readonly status: Effect.Effect<AuthStatus, GithubError>
 }
 
-const decodeUser = Schema.decodeUnknownSync(User)
-const decodeRateLimit = Schema.decodeUnknownSync(RateLimitResponse)
+const decodeUser = decode(User, 'authenticated user')
+const decodeRateLimit = decode(RateLimitResponse, 'rate limit')
 
 // Parse the comma-separated `x-oauth-scopes` header into a clean scope list.
 // Absent/blank header → `[]`; surrounding whitespace and empty segments dropped.
@@ -67,17 +68,22 @@ export class Auth extends Context.Service<Auth, AuthShape>()('Auth') {
     Effect.gen(function* () {
       const github = yield* Github
 
-      const status: AuthShape['status'] = github.requestRaw('GET /user').pipe(
-        Effect.flatMap((userResponse) =>
-          Effect.map(github.request('GET /rate_limit'), (raw) => {
-            const user = decodeUser(userResponse.data)
-            return {
+      // Sequence the two reads (preserving order: GET /user then /rate_limit),
+      // then decode both payloads effectfully so a schema mismatch surfaces as a
+      // typed DecodeError (clean envelope) instead of a thrown defect.
+      const status: AuthShape['status'] = Effect.all(
+        [github.requestRaw('GET /user'), github.request('GET /rate_limit')],
+        { concurrency: 1 }
+      ).pipe(
+        Effect.flatMap(([userResponse, rawRate]) =>
+          Effect.all([decodeUser(userResponse.data), decodeRateLimit(rawRate)], { concurrency: 1 }).pipe(
+            Effect.map(([user, rate]) => ({
               login: user.login,
               name: user.name,
-              rateLimit: decodeRateLimit(raw).rate,
+              rateLimit: rate.rate,
               scopes: parseScopes(userResponse.headers),
-            }
-          })
+            }))
+          )
         ),
         Effect.withSpan('Auth.status')
       )

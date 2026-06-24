@@ -6,6 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 
 import { NotFoundError } from '../../src/github/errors'
+import { DecodeError } from '../../src/schema/decode'
 import { GitCloneError, Repos } from '../../src/services/repos'
 import { FakeGithub } from '../helpers/fake-github'
 import { FakeSpawner } from '../helpers/fake-spawner'
@@ -37,6 +38,10 @@ const repoPayload = {
   html_url: 'https://github.com/octocat/hello',
   topics: ['cli', 'effect'],
 }
+
+// A valid repo summary payload with the required `full_name` field omitted, used
+// to exercise the decode-error path.
+const { full_name: _omitted, ...brokenRepoPayload } = repoPayload
 
 const withTopics = (names: ReadonlyArray<string>) =>
   Repos.layer.pipe(
@@ -117,6 +122,31 @@ describe('Repos service', () => {
         expect(error).toBeInstanceOf(NotFoundError)
       }).pipe(
         Effect.provide(Repos.layer.pipe(Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/repos': 404 } }))))
+      )
+    )
+
+    it.effect('a mismatched repo summary fails as a DecodeError, not a thrown defect', () =>
+      Effect.gen(function* () {
+        const repos = yield* Repos
+        // `full_name` is a required Schema.String; omitting it must surface a
+        // typed DecodeError in the E channel, not an uncaught defect.
+        const exit = yield* Effect.exit(repos.list({ type: 'all', sort: 'updated', direction: 'desc' }))
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        assert(error instanceof DecodeError)
+        expect(error.code).toBe('decode_error')
+      }).pipe(
+        Effect.provide(
+          Repos.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /user/repos': [brokenRepoPayload],
+                },
+              })
+            )
+          )
+        )
       )
     )
   })
