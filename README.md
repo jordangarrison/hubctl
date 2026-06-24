@@ -2,6 +2,23 @@
 
 `hubctl` is an **agent-first GitHub administration CLI** built with **Bun + TypeScript + Effect v4**. Every command emits a structured **JSON envelope** by default — the stable, machine-readable contract that AI agents and scripts parse — with an optional human-friendly `--pretty` rendering layer on top. Point an LLM agent at it with zero flags and it gets predictable JSON it can parse, follow, and recover from; sit a human at a terminal and it renders tables and colors automatically. The envelope is always built; the pretty view is a renderer over it, so the two views can never drift.
 
+## Coming from the Ruby version?
+
+`hubctl` was rewritten from Ruby to Bun + TypeScript + Effect (see the [announcement](https://github.com/jordangarrison/hubctl/issues/3)). The agent-first JSON envelope replaces the old `--format table|json|list` output, and config moved from `~/.hubctl.yml` to `~/.config/hubctl/config.json`.
+
+The Ruby version is **frozen, not deleted**. Pin to either:
+
+- tag **`v0.3.1`** — the last Ruby release
+- branch **`ruby`** — the exact last Ruby state on `main` (one nix fix past `v0.3.1`)
+
+```sh
+nix run github:jordangarrison/hubctl/v0.3.1 -- --help   # run without installing
+nix profile install github:jordangarrison/hubctl/ruby   # install into your profile
+devbox add github:jordangarrison/hubctl/ruby            # devbox
+```
+
+The gem still builds from that ref (`ruby >= 3.1`, `bundle install`, `bin/hubctl`). To keep developing the Ruby tool, fork from `ruby` (or tag `v0.3.1`).
+
 ## Install
 
 ### Nix (flake)
