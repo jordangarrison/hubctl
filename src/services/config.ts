@@ -11,6 +11,8 @@ import * as R from 'effect/Record'
 import * as Schema from 'effect/Schema'
 
 import { AuthError } from '../github/errors'
+import { decode } from '../schema/decode'
+import type { DecodeError } from '../schema/decode'
 
 // Resolution of GitHub credentials/settings for hubctl. Precedence mirrors the
 // Ruby `Hubctl::Config`: environment first, then the on-disk JSON config file at
@@ -25,17 +27,24 @@ export interface ConfigShape {
   readonly githubToken: Effect.Effect<string, AuthError>
   // GITHUB_ORG env, else config file `default_org`, else None.
   readonly defaultOrg: Effect.Effect<O.Option<string>>
-  // Read a single key from the config file.
-  readonly get: (key: string) => Effect.Effect<O.Option<string>, PlatformError>
-  // Write a single key into the config file (creating it if needed).
-  readonly set: (key: string, value: string) => Effect.Effect<void, PlatformError>
+  // Read a single key from the config file. `DecodeError` surfaces when the file
+  // exists but isn't valid JSON (a clean envelope, not a crash).
+  readonly get: (key: string) => Effect.Effect<O.Option<string>, PlatformError | DecodeError>
+  // Write a single key into the config file (creating it if needed). Reads the
+  // existing file first, so a corrupt file surfaces a `DecodeError`.
+  readonly set: (key: string, value: string) => Effect.Effect<void, PlatformError | DecodeError>
   // Read the whole config file as a record.
-  readonly list: Effect.Effect<Record<string, unknown>, PlatformError>
+  readonly list: Effect.Effect<Record<string, unknown>, PlatformError | DecodeError>
   // Absolute path to the on-disk config file (~/.config/hubctl/config.json).
   readonly configPath: string
 }
 
-const parseJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+// A corrupt config file is user-editable external input, so parse it through the
+// effectful `decode` helper: a malformed JSON file fails with a typed
+// `DecodeError` (rendered as a clean `ok:false` envelope) instead of throwing an
+// uncaught defect. Encoding back out stays synchronous — we serialize a string
+// record we built ourselves, which is always JSON-safe.
+const parseJson = decode(Schema.UnknownFromJsonString, 'config file')
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
 // Read an optional env var without throwing when absent.
@@ -78,7 +87,8 @@ export class Config extends Context.Service<Config, ConfigShape>()('Config') {
           return emptyRecord
         }
         const contents = yield* fs.readFileString(configPath)
-        return asRecord(parseJson(contents))
+        const parsed = yield* parseJson(contents)
+        return asRecord(parsed)
       })
 
       const writeFile = Effect.fn('Config.writeFile')(function* (record: Record<string, unknown>) {

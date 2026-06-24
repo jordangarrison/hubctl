@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Match from 'effect/Match'
 import * as O from 'effect/Option'
 import type { PlatformError } from 'effect/PlatformError'
 import * as Redacted from 'effect/Redacted'
@@ -6,6 +7,7 @@ import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
 import { Output } from '../output/service'
+import type { DecodeError } from '../schema/decode'
 import { Config } from '../services/config'
 
 // The `config` command group. Reads and mutates the on-disk hubctl config
@@ -16,11 +18,22 @@ import { Config } from '../services/config'
 
 // Render a config-file read/write failure as an `ok:false` envelope so the E
 // channel stays `never` (matching the other groups, whose `emit` absorbs the
-// typed error). The `PlatformError`'s `_tag` becomes the envelope `code`.
+// typed error). A `DecodeError` (corrupt config JSON) passes through with its own
+// `code:'decode_error'`/message/report-this fix; an I/O `PlatformError`'s `_tag`
+// becomes a `config_io_error` code with a permissions-oriented fix.
 const renderFileError =
   (output: typeof Output.Service, command: string) =>
-  (error: PlatformError): Effect.Effect<void> =>
-    output.fail(command, { code: 'config_io_error', message: error.message, fix: 'Check file permissions and retry' })
+  (error: PlatformError | DecodeError): Effect.Effect<void> =>
+    Match.value(error).pipe(
+      Match.tag('DecodeError', (decodeError) => output.fail(command, decodeError)),
+      Match.orElse((ioError) =>
+        output.fail(command, {
+          code: 'config_io_error',
+          message: ioError.message,
+          fix: 'Check file permissions and retry',
+        })
+      )
+    )
 
 const keyArg = Argument.string('key').pipe(Argument.withDescription('Configuration key'))
 const valueArg = Argument.string('value').pipe(Argument.withDescription('Configuration value'))
