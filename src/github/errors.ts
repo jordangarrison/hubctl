@@ -110,9 +110,31 @@ export const toGithubError = (err: unknown): GithubError => {
   }
 
   if (code === 403) {
-    return new ForbiddenError({
-      message,
-      fix: 'Token is missing a required scope. Regenerate it at github.com/settings/tokens.',
+    const accepted = header(err, 'x-accepted-oauth-scopes').pipe(
+      O.map((value) => value.trim()),
+      O.filter((value) => value.length > 0)
+    )
+    return O.match(accepted, {
+      onNone: () =>
+        new ForbiddenError({
+          message,
+          fix: 'Token is missing a required scope. Regenerate it at github.com/settings/tokens.',
+        }),
+      onSome: (acceptedScopes) => {
+        const have = header(err, 'x-oauth-scopes').pipe(
+          O.map((value) => value.trim()),
+          O.filter((value) => value.length > 0),
+          O.getOrElse(() => 'none')
+        )
+        const firstAcceptedScope = O.fromNullishOr(acceptedScopes.split(',')[0]).pipe(
+          O.map((scope) => scope.trim()),
+          O.getOrElse(() => acceptedScopes)
+        )
+        return new ForbiddenError({
+          message,
+          fix: `This token is missing a required scope. The endpoint accepts: ${acceptedScopes}. Your token has: ${have}. Add a missing scope (e.g. gh auth refresh -s ${firstAcceptedScope}) — you may also need admin/owner rights on the resource.`,
+        })
+      },
     })
   }
 

@@ -41,6 +41,21 @@ describe('toGithubError', () => {
     expect(err.fix).toContain('github.com/settings/tokens')
   })
 
+  it('403 with x-accepted-oauth-scopes names the missing + current scopes in the fix', () => {
+    const err = toGithubError(
+      octokitError(403, {
+        'x-accepted-oauth-scopes': 'admin:enterprise',
+        'x-oauth-scopes': 'repo, read:org',
+        'x-ratelimit-remaining': '50',
+      })
+    )
+    expect(err).toBeInstanceOf(ForbiddenError)
+    // the accepted/required scope
+    expect(err.fix).toContain('admin:enterprise')
+    // the token's current scopes
+    expect(err.fix).toContain('repo, read:org')
+  })
+
   it('maps 403 with x-ratelimit-remaining: 0 to RateLimitError', () => {
     const reset = '1750000000'
     const err = toGithubError(octokitError(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset }))
