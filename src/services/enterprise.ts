@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as O from 'effect/Option'
 import * as Order from 'effect/Order'
+import * as P from 'effect/Predicate'
 import * as R from 'effect/Record'
 import * as Schema from 'effect/Schema'
 
@@ -208,6 +209,14 @@ export interface AuditLogInput {
   readonly perPage?: number
 }
 
+// One bounded page of audit-log entries plus the `after` cursor for the next
+// page (parsed from the response `Link` header). `nextAfter` is `None` when the
+// response carries no `rel="next"` link, i.e. the caller has reached the end.
+export interface AuditLogPage {
+  readonly entries: ReadonlyArray<AuditLogEntry>
+  readonly nextAfter: O.Option<string>
+}
+
 // === SAML SSO ===
 
 // Row shape for `enterprise sso list` (lib/hubctl/enterprise.rb SamlSso#list).
@@ -357,13 +366,11 @@ export interface EnterpriseShape {
     login: string
   ) => Effect.Effect<SsoAuthorizationDetail, GithubError>
   readonly removeSsoAuthorization: (enterprise: string, login: string) => Effect.Effect<RemoveSsoResult, GithubError>
-  // Paginated audit log (lib/hubctl/enterprise.rb#audit_log). Returns the full
-  // paged result for now; Phase 8.1 wires the same data into NDJSON streaming —
-  // `auditLog` is the clean seam that streaming will consume.
-  readonly auditLog: (
-    enterprise: string,
-    input: AuditLogInput
-  ) => Effect.Effect<ReadonlyArray<AuditLogEntry>, GithubError>
+  // One bounded page of the audit log (lib/hubctl/enterprise.rb#audit_log).
+  // Fetches a SINGLE request (default per_page 30) — never auto-paginates the
+  // whole retention window — and surfaces the next-page `after` cursor from the
+  // response `Link` header so callers page deliberately with `--after`.
+  readonly auditLog: (enterprise: string, input: AuditLogInput) => Effect.Effect<AuditLogPage, GithubError>
   // Raw packages/shared-storage billing payloads (lib/hubctl/github_client.rb
   // #enterprise_packages_billing / #enterprise_shared_storage_billing). The Ruby
   // emits these verbatim, so the port surfaces the decoded object as-is.
@@ -762,15 +769,27 @@ const toAuditEntry = (entry: typeof AuditEntryRaw.Type): AuditLogEntry => ({
 })
 
 // Build the audit-log query params (lib/hubctl/enterprise.rb#audit_log
-// `audit_options`): always send `order`; include phrase/after/before/per_page
-// only when supplied.
+// `audit_options`): always send `order` AND a bounded `per_page` (default 30,
+// so a single request never tries to drain the whole retention window);
+// include phrase/after/before only when supplied.
 const auditParams = (input: AuditLogInput): Record<string, unknown> => ({
   order: input.order ?? 'desc',
+  per_page: input.perPage ?? 30,
   ...(input.phrase === undefined ? {} : { phrase: input.phrase }),
   ...(input.after === undefined ? {} : { after: input.after }),
   ...(input.before === undefined ? {} : { before: input.before }),
-  ...(input.perPage === undefined ? {} : { per_page: input.perPage }),
 })
+
+// Extract the next-page `after` cursor from the response `Link` header: find the
+// `rel="next"` URL, then pull its `after` query param. `None` when there is no
+// next page (no Link header / no `rel="next"` / no `after`).
+const nextAfterCursor = (headers: Record<string, unknown>): O.Option<string> =>
+  O.fromNullishOr(headers.link).pipe(
+    O.filter(P.isString),
+    O.flatMap((link) => O.fromNullishOr(/<(?<url>[^>]*)>;\s*rel="next"/u.exec(link)?.groups?.url)),
+    O.flatMap((url) => O.fromNullishOr(/[?&]after=(?<after>[^&]+)/u.exec(url)?.groups?.after)),
+    O.map((cursor) => decodeURIComponent(cursor))
+  )
 
 // === Members & owners helpers ===
 
@@ -936,9 +955,12 @@ export class Enterprise extends Context.Service<Enterprise, EnterpriseShape>()('
           .pipe(Effect.as({ enterprise, login, removed: true }), Effect.withSpan('Enterprise.removeSsoAuthorization'))
 
       const auditLog: EnterpriseShape['auditLog'] = (enterprise, input) =>
-        github.paginate('GET /enterprises/{enterprise}/audit-log', { enterprise, ...auditParams(input) }).pipe(
-          Effect.flatMap(decodeAuditEntries),
-          Effect.map((entries) => entries.map(toAuditEntry)),
+        github.requestRaw('GET /enterprises/{enterprise}/audit-log', { enterprise, ...auditParams(input) }).pipe(
+          Effect.flatMap((response) =>
+            decodeAuditEntries(response.data).pipe(
+              Effect.map((raw) => ({ entries: raw.map(toAuditEntry), nextAfter: nextAfterCursor(response.headers) }))
+            )
+          ),
           Effect.withSpan('Enterprise.auditLog')
         )
 

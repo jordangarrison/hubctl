@@ -339,12 +339,16 @@ describe('Enterprise service', () => {
       },
     ]
 
-    it.effect('returns shaped paged audit entries', () =>
+    // The audit-log API reports the next page via the response `Link` header;
+    // `auditLog` parses the `after` cursor out of the `rel="next"` URL.
+    const nextLink = '<https://api.github.com/enterprises/acme/audit-log?after=NEXTCURSOR&before=>; rel="next"'
+
+    it.effect('returns shaped paged audit entries with the next-page cursor', () =>
       Effect.gen(function* () {
         const ent = yield* Enterprise
-        const result = yield* ent.auditLog(enterprise, { order: 'desc' })
-        expect(result).toHaveLength(1)
-        expect(result[0]).toEqual({
+        const page = yield* ent.auditLog(enterprise, { order: 'desc' })
+        expect(page.entries).toHaveLength(1)
+        expect(page.entries[0]).toEqual({
           timestamp: 1_700_000_000_000,
           action: 'repo.create',
           actor: 'alice',
@@ -354,19 +358,31 @@ describe('Enterprise service', () => {
           created_at: 1_700_000_000_000,
           document_id: 'abc123',
         })
+        assert.deepStrictEqual(page.nextAfter, O.some('NEXTCURSOR'))
+      }).pipe(
+        Effect.provide(withRoutes({ routes: { [auditRoute]: entries }, headers: { [auditRoute]: { link: nextLink } } }))
+      )
+    )
+
+    it.effect('no next page -> nextAfter is None', () =>
+      Effect.gen(function* () {
+        const ent = yield* Enterprise
+        const page = yield* ent.auditLog(enterprise, { order: 'desc' })
+        expect(page.entries).toHaveLength(1)
+        assert.deepStrictEqual(page.nextAfter, O.none())
       }).pipe(Effect.provide(withRoutes({ routes: { [auditRoute]: entries } })))
     )
 
-    it.effect('forwards order/phrase/after/before query params', () =>
+    it.effect('forwards order/phrase/after/before query params and always a bounded per_page', () =>
       Effect.gen(function* () {
         const ent = yield* Enterprise
-        const result = yield* ent.auditLog(enterprise, {
+        const page = yield* ent.auditLog(enterprise, {
           order: 'asc',
           phrase: 'action:repo.create',
           after: 'tok-after',
           before: 'tok-before',
         })
-        expect(result[0]?.action).toBe('repo.create')
+        expect(page.entries[0]?.action).toBe('repo.create')
       }).pipe(
         Effect.provide(
           withRoutes({
@@ -375,7 +391,8 @@ describe('Enterprise service', () => {
                 params.order === 'asc' &&
                 params.phrase === 'action:repo.create' &&
                 params.after === 'tok-after' &&
-                params.before === 'tok-before'
+                params.before === 'tok-before' &&
+                params.per_page === 30
                   ? entries
                   : [{ ...entries[0], action: 'WRONG' }],
             },

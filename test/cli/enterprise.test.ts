@@ -391,18 +391,41 @@ describe('enterprise command', () => {
       },
     ]
 
-    // audit-log streams NDJSON: one `{type:'audit-entry', ...}` line per entry,
-    // then a terminal envelope whose `result` is the array of those tagged
-    // events (so a non-streaming consumer parses the final line). `runCli`
-    // returns the parsed terminal (last) line.
-    it.effect('emits shaped audit entries as the terminal envelope result', () =>
+    const shapedEntry = {
+      timestamp: 1_700_000_000_000,
+      action: 'repo.create',
+      actor: 'alice',
+      user: 'bob',
+      repo: 'acme/widgets',
+      org: 'acme',
+      created_at: 1_700_000_000_000,
+      document_id: 'abc123',
+    }
+    const nextLink = '<https://api.github.com/enterprises/acme/audit-log?after=NEXTCURSOR&before=>; rel="next"'
+
+    // audit-log emits ONE bounded page as a normal envelope: `result` is the
+    // shaped entries; the next-page cursor (from the response Link header) is
+    // surfaced as an `--after` re-run in `next_actions`.
+    it.effect('emits shaped audit entries and surfaces the next-page cursor', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(enterpriseCommand, ['audit-log', 'acme'], {
+          github: { routes: { [auditRoute]: entries }, headers: { [auditRoute]: { link: nextLink } } },
+        })
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('enterprise.audit-log')
+        expect(env.result).toEqual([shapedEntry])
+        expect(env.next_actions).toContain('hubctl enterprise audit-log acme --after NEXTCURSOR')
+      })
+    )
+
+    it.effect('no next page -> empty next_actions', () =>
       Effect.gen(function* () {
         const env = yield* runCli(enterpriseCommand, ['audit-log', 'acme'], {
           github: { routes: { [auditRoute]: entries } },
         })
         expect(env.ok).toBe(true)
-        expect(env.command).toBe('enterprise.audit-log')
-        expect(env.result).toMatchObject([{ type: 'audit-entry', action: 'repo.create', actor: 'alice' }])
+        expect(env.result).toEqual([shapedEntry])
+        expect(env.next_actions).toEqual([])
       })
     )
 
@@ -426,7 +449,7 @@ describe('enterprise command', () => {
           }
         )
         expect(env.ok).toBe(true)
-        expect(env.result).toMatchObject([{ type: 'audit-entry', action: 'repo.create' }])
+        expect(env.result).toMatchObject([{ action: 'repo.create' }])
       })
     )
   })

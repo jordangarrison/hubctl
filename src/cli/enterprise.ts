@@ -1,6 +1,5 @@
 import * as Effect from 'effect/Effect'
 import * as O from 'effect/Option'
-import * as Stream from 'effect/Stream'
 import { Argument, Flag, Prompt } from 'effect/unstable/cli'
 import * as Command from 'effect/unstable/cli/Command'
 
@@ -450,11 +449,11 @@ const auditPerPageFlag = Flag.integer('per-page').pipe(
   Flag.withDescription('Number of entries per page')
 )
 
-// The audit-log handler streams NDJSON: it tags each entry as a
-// `{type:'audit-entry', ...}` event so `Output.stream` writes one JSON object
-// per line, then a terminal envelope whose `result` is the array of those
-// events (a non-streaming consumer reads only the final line). `Enterprise.auditLog`
-// is the clean seam; we lift its paged array into a `Stream` of tagged events.
+// The audit-log handler emits ONE bounded page (default per_page 30) as a normal
+// single envelope: `result` is the shaped entries; the next-page `after` cursor
+// (parsed from the response Link header by `Enterprise.auditLog`) is surfaced as
+// an `--after` re-run in `next_actions` so callers page deliberately rather than
+// draining the entire retention window in one call.
 const auditLogCommand = Command.make('audit-log', {
   enterprise: enterpriseArg,
   order: orderFlag,
@@ -475,15 +474,15 @@ const auditLogCommand = Command.make('audit-log', {
         ...optionalField('before', before),
         ...optionalNumber('perPage', perPage),
       }
-      const events$ = Stream.fromArrayEffect(ent.auditLog(enterprise, input)).pipe(
-        Stream.map((entry) => ({ type: 'audit-entry', ...entry }))
-      )
-      // A typed Github error becomes a `Output.fail` envelope on the final line;
-      // success streams the entries then the terminal envelope (already written
-      // by `output.stream`, so the success branch is a no-op).
-      yield* Effect.matchEffect(output.stream('enterprise.audit-log', events$), {
+      yield* Effect.matchEffect(ent.auditLog(enterprise, input), {
         onFailure: (error) => output.fail('enterprise.audit-log', error),
-        onSuccess: () => Effect.void,
+        onSuccess: (page) =>
+          output.ok('enterprise.audit-log', page.entries, {
+            next_actions: O.match(page.nextAfter, {
+              onNone: () => [],
+              onSome: (cursor) => [`hubctl enterprise audit-log ${enterprise} --after ${cursor}`],
+            }),
+          }),
       })
     })
   )
