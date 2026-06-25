@@ -380,14 +380,14 @@ describe('enterprise command', () => {
     const auditRoute = 'GET /enterprises/{enterprise}/audit-log'
     const entries = [
       {
-        timestamp: 1_700_000_000_000,
+        '@timestamp': 1_700_000_000_000,
         action: 'repo.create',
         actor: 'alice',
         user: 'bob',
         repo: 'acme/widgets',
         org: 'acme',
         created_at: 1_700_000_000_000,
-        document_id: 'abc123',
+        _document_id: 'abc123',
       },
     ]
 

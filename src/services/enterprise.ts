@@ -734,28 +734,31 @@ const securityUpdateBody = (input: SecurityAnalysisInput): Record<string, unknow
 
 // Raw audit-log entry fields read by `auditLog`. All optional/nullable on the
 // wire; the transform fills absent fields with null (mirroring the Ruby
-// hash-access defaults).
+// hash-access defaults). The GitHub Enterprise audit-log API returns the
+// timestamp/document id under the prefixed wire keys `@timestamp` (integer ms)
+// and `_document_id` (string); the shaped output exposes them as the bare
+// `timestamp`/`document_id` names (see `toAuditEntry`).
 const AuditEntryRaw = Schema.Struct({
-  timestamp: Schema.optional(Schema.NullOr(Schema.Finite)),
+  '@timestamp': Schema.optional(Schema.NullOr(Schema.Finite)),
   action: Schema.optional(Schema.NullOr(Schema.String)),
   actor: Schema.optional(Schema.NullOr(Schema.String)),
   user: Schema.optional(Schema.NullOr(Schema.String)),
   repo: Schema.optional(Schema.NullOr(Schema.String)),
   org: Schema.optional(Schema.NullOr(Schema.String)),
   created_at: Schema.optional(Schema.NullOr(Schema.Finite)),
-  document_id: Schema.optional(Schema.NullOr(Schema.String)),
+  _document_id: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const decodeAuditEntries = decode(Schema.Array(AuditEntryRaw), 'audit log entries')
 
 const toAuditEntry = (entry: typeof AuditEntryRaw.Type): AuditLogEntry => ({
-  timestamp: entry.timestamp ?? null,
+  timestamp: entry['@timestamp'] ?? null,
   action: entry.action ?? null,
   actor: entry.actor ?? null,
   user: entry.user ?? null,
   repo: entry.repo ?? null,
   org: entry.org ?? null,
   created_at: entry.created_at ?? null,
-  document_id: entry.document_id ?? null,
+  document_id: entry['_document_id'] ?? null,
 })
 
 // Build the audit-log query params (lib/hubctl/enterprise.rb#audit_log
