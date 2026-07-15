@@ -1,0 +1,10 @@
+# Keep GitHub Actions pins fresh weekly.
+# NOTE: Dependabot bumps action versions but NOT the `bun-version: 1.3.0` literal
+# in ci.yml — keep that in lockstep with the nixpkgs flake bun pin manually when
+# the flake input is bumped (so the Bun and Nix lanes don't skew).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

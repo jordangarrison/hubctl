@@ -1,0 +1,21 @@
+id: no-raw-stdout-in-cli
+valid:
+  - |
+    Output.pipe(Effect.flatMap((output) => output.ok('repos', tree)))
+  - |
+    yield* output.fail('repos.archive', error)
+  - |
+    emit('repos.list', repos.list(input), { next_actions: [] })
+invalid:
+  - |
+    console.log('hello')
+  - |
+    console.error('hello')
+  - |
+    Console.log('hello')
+  - |
+    Console.error('hello')
+  - |
+    process.stdout.write('hello')
+  - |
+    process.stderr.write('hello')

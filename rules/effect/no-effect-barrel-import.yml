@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+id: no-effect-barrel-import
+language: tsx
+severity: error
+message: Import Effect submodules directly (e.g. 'effect/Effect'), never the 'effect' barrel.
+note: >-
+  oxlint bans barrel imports; the repo convention is submodule namespace imports
+  only (import * as Effect from 'effect/Effect'). The bare 'effect' barrel pulls
+  the whole library and defeats tree-shaking in the compiled binary.
+files:
+  - src/**
+  - test/**
+rule:
+  pattern: import $$$ from 'effect'

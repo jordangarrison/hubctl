@@ -1,0 +1,22 @@
+id: command-requires-description
+valid:
+  - |
+    Command.make('version').pipe(
+      Command.withDescription('Show the hubctl version'),
+      Command.withHandler(() => Effect.void)
+    )
+  - |
+    Command.make('repos', { org: orgFlag }).pipe(
+      Command.withDescription('List repositories'),
+      Command.withHandler(handler)
+    )
+invalid:
+  - |
+    Command.make('version').pipe(
+      Command.withHandler(() => Effect.void)
+    )
+  - |
+    Command.make('repos', { org: orgFlag }).pipe(
+      Command.withHandler(handler),
+      Command.withSubcommands(subcommands)
+    )

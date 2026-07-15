@@ -1,0 +1,14 @@
+id: no-effect-barrel-import
+snapshots:
+  import * as Effect from 'effect':
+    labels:
+    - source: import * as Effect from 'effect'
+      style: primary
+      start: 0
+      end: 32
+  import { Effect } from 'effect':
+    labels:
+    - source: import { Effect } from 'effect'
+      style: primary
+      start: 0
+      end: 31

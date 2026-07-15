@@ -1,0 +1,8 @@
+id: no-effect-barrel-import
+valid:
+  - import * as Effect from 'effect/Effect'
+  - import * as Command from 'effect/unstable/cli/Command'
+  - import * as O from 'effect/Option'
+invalid:
+  - import * as Effect from 'effect'
+  - import { Effect } from 'effect'

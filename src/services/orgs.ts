@@ -1,0 +1,392 @@
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
+
+import { Github } from '../github/client'
+import type { GithubError } from '../github/errors'
+import { decode } from '../schema/decode'
+
+// Domain service for the `orgs` command group. Depends only on `Github`;
+// mirrors the data shaping in lib/hubctl/orgs.rb so the JSON envelope matches
+// the Ruby tool's output fields. Each method maps a GitHub REST route through
+// `Github.request`/`paginate` and reshapes the raw payload.
+
+// Row shape for `orgs list`. The list endpoint (`GET /user/orgs`) returns a
+// MINIMAL org object — login/id/description/url only; the per-org counts and
+// `html_url` are absent (they live on the `GET /orgs/{org}` detail). The Ruby
+// read them anyway and rendered `nil`, so these stay nullable here.
+export interface OrgListItem {
+  readonly login: string
+  readonly id: number
+  readonly description: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly public_repos: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly public_gists: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly followers: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly following: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly url: string | null
+}
+
+// Full detail shape for `orgs show` (lib/hubctl/orgs.rb#show `org_details`).
+export interface OrgDetail {
+  readonly login: string
+  readonly id: number
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly name: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly company: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly blog: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly location: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly email: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly bio: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly description: string | null
+  readonly public_repos: number
+  readonly public_gists: number
+  readonly followers: number
+  readonly following: number
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly collaborators: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly billing_email: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly plan: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly private_gists: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly total_private_repos: number | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly owned_private_repos: number | null
+  readonly disk_usage: string
+  readonly created_at: string
+  readonly updated_at: string
+  readonly url: string
+}
+
+// Row shape for `orgs members` (lib/hubctl/orgs.rb#members `member_data`).
+export interface OrgMember {
+  readonly login: string
+  readonly id: number
+  readonly type: string
+  readonly site_admin: boolean
+  readonly url: string
+}
+
+export type MemberRole = 'all' | 'admin' | 'member'
+
+export interface MembersInput {
+  readonly role?: MemberRole
+  readonly twoFaDisabled?: boolean
+}
+
+// Row shape for `orgs repos` (lib/hubctl/orgs.rb#repos `repo_data`).
+export interface OrgRepo {
+  readonly name: string
+  readonly private: boolean
+  readonly description: string
+  readonly language: string
+  readonly stars: number
+  readonly forks: number
+  readonly updated: string
+}
+
+export type OrgRepoType = 'all' | 'public' | 'private' | 'forks' | 'sources' | 'member'
+export type OrgRepoSort = 'created' | 'updated' | 'pushed' | 'full_name'
+
+export interface ReposInput {
+  readonly type: OrgRepoType
+  readonly sort: OrgRepoSort
+}
+
+// Row shape for `orgs teams` (lib/hubctl/orgs.rb#teams `team_data`).
+export interface OrgTeam {
+  readonly name: string
+  readonly slug: string
+  readonly description: string
+  readonly privacy: string
+  // The team LIST endpoint (`GET /orgs/{org}/teams`) omits these counts (only the
+  // team detail returns them); render '-' when absent, matching `teams list`.
+  readonly members_count: number | '-'
+  readonly repos_count: number | '-'
+}
+
+// A single numbered org membership in the `orgs info` view.
+export interface OrgMembership {
+  readonly index: number
+  readonly login: string
+  readonly description: string
+}
+
+// Combined identity + memberships shape for `orgs info`
+// (lib/hubctl/orgs.rb#info).
+export interface OrgInfo {
+  readonly login: string
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly name: string | null
+  // eslint-disable-next-line effect/prefer-option-over-null
+  readonly plan: string | null
+  readonly organizations: ReadonlyArray<OrgMembership>
+}
+
+export interface OrgsShape {
+  readonly list: Effect.Effect<ReadonlyArray<OrgListItem>, GithubError>
+  readonly show: (org: string) => Effect.Effect<OrgDetail, GithubError>
+  readonly members: (org: string, input: MembersInput) => Effect.Effect<ReadonlyArray<OrgMember>, GithubError>
+  readonly repos: (org: string, input: ReposInput) => Effect.Effect<ReadonlyArray<OrgRepo>, GithubError>
+  readonly teams: (org: string) => Effect.Effect<ReadonlyArray<OrgTeam>, GithubError>
+  readonly info: Effect.Effect<OrgInfo, GithubError>
+}
+
+// Raw org summary fields read by `list`. `description` is nullable on the wire;
+// the contract collapses it to '-' (matching the Ruby).
+const OrgSummary = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  description: Schema.NullOr(Schema.String),
+  // Absent from `GET /user/orgs`; present only on the org detail endpoint.
+  public_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  public_gists: Schema.optional(Schema.NullOr(Schema.Finite)),
+  followers: Schema.optional(Schema.NullOr(Schema.Finite)),
+  following: Schema.optional(Schema.NullOr(Schema.Finite)),
+  html_url: Schema.optional(Schema.NullOr(Schema.String)),
+})
+const decodeSummaries = decode(Schema.Array(OrgSummary), 'org summary list')
+
+// Full org payload for `show`. Many fields are nullable on the GitHub API (and
+// only present for orgs the caller administers); the detail view shows them
+// verbatim (unlike the list's '-' default).
+const OrgFull = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  name: Schema.NullOr(Schema.String),
+  company: Schema.NullOr(Schema.String),
+  blog: Schema.NullOr(Schema.String),
+  location: Schema.NullOr(Schema.String),
+  email: Schema.NullOr(Schema.String),
+  // `bio` is a USER field; organizations never return it. Optional, not required.
+  bio: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.NullOr(Schema.String),
+  public_repos: Schema.Finite,
+  public_gists: Schema.Finite,
+  followers: Schema.Finite,
+  following: Schema.Finite,
+  collaborators: Schema.optional(Schema.NullOr(Schema.Finite)),
+  billing_email: Schema.optional(Schema.NullOr(Schema.String)),
+  plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+  private_gists: Schema.optional(Schema.NullOr(Schema.Finite)),
+  total_private_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  owned_private_repos: Schema.optional(Schema.NullOr(Schema.Finite)),
+  disk_usage: Schema.optional(Schema.NullOr(Schema.Finite)),
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  html_url: Schema.String,
+})
+const decodeFull = decode(OrgFull, 'org detail')
+
+const toDetail = (org: typeof OrgFull.Type): OrgDetail => ({
+  login: org.login,
+  id: org.id,
+  name: org.name,
+  company: org.company,
+  blog: org.blog,
+  location: org.location,
+  email: org.email,
+  bio: org.bio ?? null,
+  description: org.description,
+  public_repos: org.public_repos,
+  public_gists: org.public_gists,
+  followers: org.followers,
+  following: org.following,
+  collaborators: org.collaborators ?? null,
+  billing_email: org.billing_email ?? null,
+  plan: org.plan?.name ?? null,
+  private_gists: org.private_gists ?? null,
+  total_private_repos: org.total_private_repos ?? null,
+  owned_private_repos: org.owned_private_repos ?? null,
+  disk_usage: `${org.disk_usage ?? 0} KB`,
+  created_at: org.created_at,
+  updated_at: org.updated_at,
+  url: org.html_url,
+})
+
+// Raw member payload fields read by `members`.
+const Member = Schema.Struct({
+  login: Schema.String,
+  id: Schema.Finite,
+  type: Schema.String,
+  // `site_admin` is GitHub's wire field name; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  site_admin: Schema.Boolean,
+  html_url: Schema.String,
+})
+const decodeMembers = decode(Schema.Array(Member), 'org member list')
+
+const toMember = (member: typeof Member.Type): OrgMember => ({
+  login: member.login,
+  id: member.id,
+  type: member.type,
+  site_admin: member.site_admin,
+  url: member.html_url,
+})
+
+// GitHub's member list treats `role=all` as the default; the Ruby omits the
+// param in that case, so we mirror that and only send an explicit non-`all`
+// role. `--2fa-disabled` maps to the `filter=2fa_disabled` query param.
+const memberParams = (input: MembersInput): Record<string, unknown> => ({
+  ...(input.role === undefined || input.role === 'all' ? {} : { role: input.role }),
+  ...(input.twoFaDisabled === true ? { filter: '2fa_disabled' } : {}),
+})
+
+const toListItem = (org: typeof OrgSummary.Type): OrgListItem => ({
+  login: org.login,
+  id: org.id,
+  description: org.description ?? '-',
+  public_repos: org.public_repos ?? null,
+  public_gists: org.public_gists ?? null,
+  followers: org.followers ?? null,
+  following: org.following ?? null,
+  url: org.html_url ?? null,
+})
+
+// Raw org-repo payload fields read by `repos`. `description`/`language` are
+// nullable on the wire; the contract collapses them to '-' (matching the Ruby).
+const OrgRepoRaw = Schema.Struct({
+  name: Schema.String,
+  // `private` is GitHub's wire field name; the is*-prefix idiom doesn't apply.
+  // eslint-disable-next-line effect/require-is-prefix-for-boolean-schema-field
+  private: Schema.Boolean,
+  description: Schema.NullOr(Schema.String),
+  language: Schema.NullOr(Schema.String),
+  stargazers_count: Schema.Finite,
+  forks_count: Schema.Finite,
+  updated_at: Schema.String,
+})
+const decodeRepos = decode(Schema.Array(OrgRepoRaw), 'org repo list')
+
+const toRepo = (repo: typeof OrgRepoRaw.Type): OrgRepo => ({
+  name: repo.name,
+  private: repo.private,
+  description: repo.description ?? '-',
+  language: repo.language ?? '-',
+  stars: repo.stargazers_count,
+  forks: repo.forks_count,
+  updated: repo.updated_at,
+})
+
+// GitHub's org-repo list treats `type=all` as the default; the Ruby omits the
+// param in that case (`options[:type] == 'all' ? nil : options[:type]`), so we
+// mirror that and only send an explicit non-`all` type. `sort` is always sent.
+const repoParams = (input: ReposInput): Record<string, unknown> => ({
+  sort: input.sort,
+  ...(input.type === 'all' ? {} : { type: input.type }),
+})
+
+// Raw team payload fields read by `teams`. `description` is nullable on the
+// wire; the contract collapses it to '-' (matching the Ruby).
+const TeamRaw = Schema.Struct({
+  name: Schema.String,
+  slug: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  privacy: Schema.String,
+  // Absent from the team LIST endpoint; present only on the team detail.
+  members_count: Schema.optional(Schema.Finite),
+  repos_count: Schema.optional(Schema.Finite),
+})
+const decodeTeams = decode(Schema.Array(TeamRaw), 'org team list')
+
+const toTeam = (team: typeof TeamRaw.Type): OrgTeam => ({
+  name: team.name,
+  slug: team.slug,
+  description: team.description ?? '-',
+  privacy: team.privacy,
+  members_count: team.members_count ?? '-',
+  repos_count: team.repos_count ?? '-',
+})
+
+// The authenticated-user payload `info` reads: login, optional display name, and
+// the plan name (lib/hubctl/orgs.rb#info `user[:plan][:name]`).
+const CurrentUser = Schema.Struct({
+  login: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  plan: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+})
+const decodeCurrentUser = decode(CurrentUser, 'current user')
+
+// Number each membership and default a missing description to the Ruby's
+// 'No description' marker (lib/hubctl/orgs.rb#info).
+const toMembership = (org: typeof OrgSummary.Type, index: number): OrgMembership => ({
+  index: index + 1,
+  login: org.login,
+  description: org.description ?? 'No description',
+})
+
+export class Orgs extends Context.Service<Orgs, OrgsShape>()('Orgs') {
+  static readonly layer: Layer.Layer<Orgs, never, Github> = Layer.effect(
+    Orgs,
+    Effect.gen(function* () {
+      const github = yield* Github
+
+      const list: OrgsShape['list'] = github.paginate('GET /user/orgs').pipe(
+        Effect.flatMap(decodeSummaries),
+        Effect.map((orgs) => orgs.map(toListItem)),
+        Effect.withSpan('Orgs.list')
+      )
+
+      const show: OrgsShape['show'] = (org) =>
+        github
+          .request('GET /orgs/{org}', { org })
+          .pipe(Effect.flatMap(decodeFull), Effect.map(toDetail), Effect.withSpan('Orgs.show'))
+
+      const members: OrgsShape['members'] = (org, input) =>
+        github.paginate('GET /orgs/{org}/members', { org, ...memberParams(input) }).pipe(
+          Effect.flatMap(decodeMembers),
+          Effect.map((list_) => list_.map(toMember)),
+          Effect.withSpan('Orgs.members')
+        )
+
+      const repos: OrgsShape['repos'] = (org, input) =>
+        github.paginate('GET /orgs/{org}/repos', { org, ...repoParams(input) }).pipe(
+          Effect.flatMap(decodeRepos),
+          Effect.map((list_) => list_.map(toRepo)),
+          Effect.withSpan('Orgs.repos')
+        )
+
+      const teams: OrgsShape['teams'] = (org) =>
+        github.paginate('GET /orgs/{org}/teams', { org }).pipe(
+          Effect.flatMap(decodeTeams),
+          Effect.map((list_) => list_.map(toTeam)),
+          Effect.withSpan('Orgs.teams')
+        )
+
+      // Sequence the two reads (GET /user then the org list), then decode both
+      // effectfully so a mismatch surfaces as a typed DecodeError (clean
+      // envelope) rather than a thrown defect.
+      const info: OrgsShape['info'] = Effect.all([github.request('GET /user'), github.paginate('GET /user/orgs')], {
+        concurrency: 1,
+      }).pipe(
+        Effect.flatMap(([rawUser, rawOrgs]) =>
+          Effect.all([decodeCurrentUser(rawUser), decodeSummaries(rawOrgs)], { concurrency: 1 }).pipe(
+            Effect.map(([user, orgs]) => ({
+              login: user.login,
+              name: user.name ?? null,
+              plan: user.plan?.name ?? null,
+              organizations: orgs.map(toMembership),
+            }))
+          )
+        ),
+        Effect.withSpan('Orgs.info')
+      )
+
+      return { list, show, members, repos, teams, info }
+    })
+  )
+}

@@ -1,0 +1,44 @@
+id: no-raw-stdout-in-cli
+snapshots:
+  ? |
+    Console.error('hello')
+  : labels:
+    - source: Console.error('hello')
+      style: primary
+      start: 0
+      end: 22
+  ? |
+    Console.log('hello')
+  : labels:
+    - source: Console.log('hello')
+      style: primary
+      start: 0
+      end: 20
+  ? |
+    console.error('hello')
+  : labels:
+    - source: console.error('hello')
+      style: primary
+      start: 0
+      end: 22
+  ? |
+    console.log('hello')
+  : labels:
+    - source: console.log('hello')
+      style: primary
+      start: 0
+      end: 20
+  ? |
+    process.stderr.write('hello')
+  : labels:
+    - source: process.stderr.write('hello')
+      style: primary
+      start: 0
+      end: 29
+  ? |
+    process.stdout.write('hello')
+  : labels:
+    - source: process.stdout.write('hello')
+      style: primary
+      start: 0
+      end: 29

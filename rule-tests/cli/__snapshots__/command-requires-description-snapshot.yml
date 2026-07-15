@@ -1,0 +1,28 @@
+id: command-requires-description
+snapshots:
+  ? |
+    Command.make('repos', { org: orgFlag }).pipe(
+      Command.withHandler(handler),
+      Command.withSubcommands(subcommands)
+    )
+  : labels:
+    - source: |-
+        Command.make('repos', { org: orgFlag }).pipe(
+          Command.withHandler(handler),
+          Command.withSubcommands(subcommands)
+        )
+      style: primary
+      start: 0
+      end: 118
+  ? |
+    Command.make('version').pipe(
+      Command.withHandler(() => Effect.void)
+    )
+  : labels:
+    - source: |-
+        Command.make('version').pipe(
+          Command.withHandler(() => Effect.void)
+        )
+      style: primary
+      start: 0
+      end: 72
