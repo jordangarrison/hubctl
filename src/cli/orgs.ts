@@ -6,7 +6,10 @@ import * as Command from 'effect/unstable/cli/Command'
 import { Output } from '../output/service'
 import { Orgs } from '../services/orgs'
 import type { MembersInput, ReposInput } from '../services/orgs'
+import { Users } from '../services/users'
+import type { InviteInput } from '../services/users'
 import { emit } from './handle'
+import { inviteRoleFlag, targetArg, teamFlag } from './users'
 
 const orgArg = Argument.string('org').pipe(Argument.withDescription('Organization login'))
 
@@ -99,6 +102,33 @@ const teamsCommand = Command.make('teams', { org: orgArg }).pipe(
   )
 )
 
+// `orgs invite` is an org-scoped alias for `users invite`: it delegates to the
+// same `Users.invite` service (which resolves a username to an invitee id or
+// invites by email, and forwards role/team_ids), so the two stay in lockstep.
+// Org is the group's leading positional here, matching every other `orgs`
+// subcommand, rather than the `--org` flag `users invite` uses.
+const inviteCommand = Command.make('invite', {
+  org: orgArg,
+  target: targetArg,
+  role: inviteRoleFlag,
+  team: teamFlag,
+}).pipe(
+  Command.withDescription('Invite a user to the organization by email or username'),
+  Command.withHandler(({ org, role, target, team }) =>
+    Users.pipe(
+      Effect.flatMap((users) => {
+        const input: InviteInput = {
+          ...O.match(role, { onNone: () => ({}), onSome: (v) => ({ role: v }) }),
+          ...O.match(team, { onNone: () => ({}), onSome: (v) => ({ teamIds: v }) }),
+        }
+        return emit('orgs.invite', users.invite(org, target, input), {
+          next_actions: ['hubctl orgs members <org>', 'hubctl teams add <team> <user> --org <org>'],
+        })
+      })
+    )
+  )
+)
+
 const infoCommand = Command.make('info').pipe(
   Command.withDescription("Show the authenticated user's organization memberships"),
   Command.withHandler(() =>
@@ -114,7 +144,15 @@ const infoCommand = Command.make('info').pipe(
 
 // Subcommand discovery for `hubctl orgs` with no subcommand: emit the group's
 // `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, showCommand, membersCommand, reposCommand, teamsCommand, infoCommand] as const
+const subcommands = [
+  listCommand,
+  showCommand,
+  membersCommand,
+  reposCommand,
+  teamsCommand,
+  inviteCommand,
+  infoCommand,
+] as const
 
 interface GroupEntry {
   readonly name: string
@@ -132,7 +170,7 @@ export const orgsCommand = (): Command.Command<
   Record<string, never>,
   Record<string, never>,
   never,
-  Output | Orgs
+  Output | Orgs | Users
 > =>
   Command.make('orgs').pipe(
     Command.withDescription('Manage organizations'),
