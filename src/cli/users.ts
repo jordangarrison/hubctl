@@ -66,12 +66,15 @@ const listCommand = Command.make('list', { org: orgFlag, role: roleFlag }).pipe(
   )
 )
 
-const targetArg = Argument.string('target').pipe(Argument.withDescription('Email address or username to invite'))
-const inviteRoleFlag = Flag.string('role').pipe(Flag.optional, Flag.withDescription('Membership role'))
+// The invite argument/flags are exported so `orgs invite` can reuse the exact
+// same parsing (it delegates to the same `Users.invite` service) rather than
+// duplicating it.
+export const targetArg = Argument.string('target').pipe(Argument.withDescription('Email address or username to invite'))
+export const inviteRoleFlag = Flag.string('role').pipe(Flag.optional, Flag.withDescription('Membership role'))
 
-// v4 `Flag` has no repeated/variadic form, so team ids are passed as a single
-// comma-separated flag (e.g. `--team 1,2`) and split here. Blank segments are
-// dropped so a trailing comma is harmless; each remaining segment is a number.
+// The invite team ids are passed as a single comma-separated flag (e.g.
+// `--team 1,2`) and split here. Blank segments are dropped so a trailing comma is
+// harmless; each remaining segment is a number.
 const splitTeamIds = (value: O.Option<string>): O.Option<ReadonlyArray<number>> =>
   value.pipe(
     O.map((csv) =>
@@ -82,7 +85,7 @@ const splitTeamIds = (value: O.Option<string>): O.Option<ReadonlyArray<number>> 
         .map(Number)
     )
   )
-const teamFlag = Flag.string('team').pipe(
+export const teamFlag = Flag.string('team').pipe(
   Flag.optional,
   Flag.map(splitTeamIds),
   Flag.withDescription('Team ids to add the invitee to (comma-separated)')

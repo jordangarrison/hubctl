@@ -374,4 +374,166 @@ describe('Teams service', () => {
       )
     )
   })
+
+  describe('repoAccess', () => {
+    const repoPayload = {
+      name: 'orbit',
+      full_name: 'acme/orbit',
+      private: true,
+      role_name: 'write',
+      permissions: { admin: false, maintain: false, push: true, triage: true, pull: true },
+    }
+
+    it.effect('lists team repos via GET /orgs/{org}/teams/{team_slug}/repos and prefers role_name', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.repoAccess('acme', 'core')
+        expect(result).toHaveLength(1)
+        expect(result[0]).toEqual({ name: 'orbit', full_name: 'acme/orbit', private: true, permission: 'write' })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams/{team_slug}/repos': (params: Record<string, unknown>) =>
+                    params.org === 'acme' && params.team_slug === 'core' ? [repoPayload] : [],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    // When the API omits `role_name`, the effective permission is derived from the
+    // highest granted bit in the `permissions` map (push here ⇒ 'push').
+    it.effect('falls back to the highest permission bit when role_name is absent', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.repoAccess('acme', 'core')
+        expect(result[0]?.permission).toBe('push')
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'GET /orgs/{org}/teams/{team_slug}/repos': [
+                    {
+                      name: 'orbit',
+                      full_name: 'acme/orbit',
+                      private: true,
+                      permissions: { admin: false, maintain: false, push: true, triage: true, pull: true },
+                    },
+                  ],
+                },
+              })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError when the team 404s', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.repoAccess('acme', 'missing'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(FakeGithub.layer({ fail: { 'GET /orgs/{org}/teams/{team_slug}/repos': 404 } }))
+          )
+        )
+      )
+    )
+  })
+
+  describe('grantRepo', () => {
+    // The PUT returns 204 (no body) and `grantRepo` echoes its arguments, so we
+    // capture the wire params in a closure to assert they were forwarded (route
+    // key names, permission body) rather than relying on the echoed result alone.
+    it.effect('grants access via PUT and forwards the wire params', () => {
+      let captured: Record<string, unknown> = {}
+      return Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.grantRepo('acme', 'core', 'acme', 'orbit', 'push')
+        expect(result).toEqual({ team: 'core', owner: 'acme', repo: 'orbit', permission: 'push', granted: true })
+        expect(captured).toMatchObject({
+          org: 'acme',
+          team_slug: 'core',
+          owner: 'acme',
+          repo: 'orbit',
+          permission: 'push',
+        })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({
+                routes: {
+                  'PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': (params: Record<string, unknown>) => {
+                    captured = params
+                    return {}
+                  },
+                },
+              })
+            )
+          )
+        )
+      )
+    })
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.grantRepo('acme', 'core', 'acme', 'ghost', 'pull'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(FakeGithub.layer({ fail: { 'PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': 404 } }))
+          )
+        )
+      )
+    )
+  })
+
+  describe('removeRepo', () => {
+    it.effect('removes access via DELETE and echoes the inputs', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const result = yield* teams.removeRepo('acme', 'core', 'acme', 'orbit')
+        expect(result).toEqual({ team: 'core', owner: 'acme', repo: 'orbit', removed: true })
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ routes: { 'DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': {} } })
+            )
+          )
+        )
+      )
+    )
+
+    it.effect('surfaces NotFoundError on a 404', () =>
+      Effect.gen(function* () {
+        const teams = yield* Teams
+        const exit = yield* Effect.exit(teams.removeRepo('acme', 'core', 'acme', 'ghost'))
+        const error = Exit.isFailure(exit) ? O.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        expect(error).toBeInstanceOf(NotFoundError)
+      }).pipe(
+        Effect.provide(
+          Teams.layer.pipe(
+            Layer.provide(
+              FakeGithub.layer({ fail: { 'DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': 404 } })
+            )
+          )
+        )
+      )
+    )
+  })
 })

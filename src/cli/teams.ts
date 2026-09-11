@@ -178,10 +178,9 @@ const removeCommand = Command.make('remove', { team: teamArg, user: userArg, org
   )
 )
 
-// Subcommand discovery for `hubctl teams` with no subcommand: emit the group's
-// `{ name, description }` list so an agent can enumerate the surface.
-const subcommands = [listCommand, showCommand, createCommand, membersCommand, addCommand, removeCommand] as const
-
+// Project a Command down to its discoverable `{ name, description }` entry for
+// the group-listing handlers below (used by both the `repo-access` group and the
+// top-level `teams` group).
 interface GroupEntry {
   readonly name: string
   // eslint-disable-next-line effect/prefer-option-over-null
@@ -192,6 +191,151 @@ const toEntry = (command: GroupEntry): { name: string; description: string } => 
   name: command.name,
   description: O.getOrElse(O.fromUndefinedOr(command.description), () => ''),
 })
+
+// === repo-access ===
+
+// A repository is named either bare (`orbit`) — owned by the resolved org — or
+// fully qualified (`acme/orbit`). Teams can only be granted repos in their own
+// org, so a bare name defaults its owner to that org.
+const repoArg = Argument.string('repo').pipe(Argument.withDescription('Repository (name or owner/name)'))
+
+const parseRepo = (org: string, repo: string): { owner: string; repo: string } => {
+  const slash = repo.indexOf('/')
+  return slash === -1 ? { owner: org, repo } : { owner: repo.slice(0, slash), repo: repo.slice(slash + 1) }
+}
+
+const repoPermissionFlag = Flag.choice('permission', ['pull', 'triage', 'push', 'maintain', 'admin']).pipe(
+  Flag.withDefault('pull'),
+  Flag.withDescription('Permission level to grant')
+)
+
+const repoAccessListCommand = Command.make('list', { team: teamArg, org: orgFlag }).pipe(
+  Command.withDescription('List repositories a team can access'),
+  Command.withHandler(({ org, team }) =>
+    Teams.pipe(
+      Effect.flatMap((teams) =>
+        emit(
+          'teams.repo-access.list',
+          resolveOrg(org).pipe(Effect.flatMap((resolved) => teams.repoAccess(resolved, team))),
+          { next_actions: ['hubctl teams repo-access grant <team> <repo> --org <org>'] }
+        )
+      )
+    )
+  )
+)
+
+const repoAccessGrantCommand = Command.make('grant', {
+  team: teamArg,
+  repo: repoArg,
+  org: orgFlag,
+  permission: repoPermissionFlag,
+}).pipe(
+  Command.withDescription("Grant or update a team's access to a repository"),
+  Command.withHandler(({ org, permission, repo, team }) =>
+    Teams.pipe(
+      Effect.flatMap((teams) =>
+        emit(
+          'teams.repo-access.grant',
+          resolveOrg(org).pipe(
+            Effect.flatMap((resolved) => {
+              const target = parseRepo(resolved, repo)
+              return teams.grantRepo(resolved, team, target.owner, target.repo, permission)
+            })
+          ),
+          { next_actions: ['hubctl teams repo-access list <team> --org <org>'] }
+        )
+      )
+    )
+  )
+)
+
+const repoAccessRemoveNextActions = ['hubctl teams repo-access list <team> --org <org>']
+
+// Resolve whether the revoke may proceed. `--yes` short-circuits to true. In json
+// mode (agents/pipes) we NEVER prompt, so without `--yes` the answer is false (the
+// handler then fails with a re-run `fix`). In pretty/TTY mode we ask interactively.
+const confirmRevoke = (
+  team: string,
+  repo: string,
+  yes: boolean,
+  output: typeof Output.Service
+): Effect.Effect<boolean, never, Prompt.Environment> => {
+  if (yes) {
+    return Effect.succeed(true)
+  }
+  if (output.mode === 'json') {
+    return Effect.succeed(false)
+  }
+  return Prompt.run(
+    Prompt.confirm({ message: `Revoke team ${team}'s access to ${repo}? This cannot be undone easily.` })
+  ).pipe(Effect.orElseSucceed(() => false))
+}
+
+const repoAccessRemoveCommand = Command.make('remove', {
+  team: teamArg,
+  repo: repoArg,
+  org: orgFlag,
+  yes: yesFlag,
+}).pipe(
+  Command.withDescription("Revoke a team's access to a repository"),
+  Command.withHandler(({ org, repo, team, yes }) =>
+    Effect.gen(function* () {
+      const output = yield* Output
+      const teams = yield* Teams
+      // Resolve `--org`/GITHUB_ORG/default_org first; an unresolved org fails with
+      // a `ValidationError` rendered as the standard `ok:false` envelope.
+      const resolved = yield* resolveOrg(org).pipe(Effect.option)
+      if (O.isNone(resolved)) {
+        yield* emit('teams.repo-access.remove', resolveOrg(org), { next_actions: repoAccessRemoveNextActions })
+        return
+      }
+      const orgName = resolved.value
+      const target = parseRepo(orgName, repo)
+      const confirmed = yield* confirmRevoke(team, repo, yes, output)
+
+      if (confirmed) {
+        yield* emit('teams.repo-access.remove', teams.removeRepo(orgName, team, target.owner, target.repo), {
+          next_actions: repoAccessRemoveNextActions,
+        })
+        return
+      }
+
+      // Declined: in json mode surface an actionable `fix`; in pretty mode the
+      // user chose "no", so report a cancelled (non-destructive) result.
+      yield* output.mode === 'json'
+        ? output.fail('teams.repo-access.remove', {
+            code: 'confirmation_required',
+            message: `Revoking team ${team}'s access to ${repo} is destructive and was not confirmed`,
+            fix: 're-run with --yes',
+          })
+        : output.ok('teams.repo-access.remove', { team, repo, removed: false, cancelled: true })
+    })
+  )
+)
+
+const repoAccessSubcommands = [repoAccessListCommand, repoAccessGrantCommand, repoAccessRemoveCommand] as const
+
+const repoAccessCommand = Command.make('repo-access').pipe(
+  Command.withDescription("Manage a team's repository access"),
+  Command.withHandler(() =>
+    Output.pipe(
+      Effect.flatMap((output) => output.ok('teams.repo-access', { commands: repoAccessSubcommands.map(toEntry) }))
+    )
+  ),
+  Command.withSubcommands(repoAccessSubcommands)
+)
+
+// Subcommand discovery for `hubctl teams` with no subcommand: emit the group's
+// `{ name, description }` list so an agent can enumerate the surface.
+const subcommands = [
+  listCommand,
+  showCommand,
+  createCommand,
+  membersCommand,
+  addCommand,
+  removeCommand,
+  repoAccessCommand,
+] as const
 
 export const teamsCommand = (): Command.Command<
   'teams',
