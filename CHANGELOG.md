@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > Going forward this changelog is owned by [release-please](https://github.com/googleapis/release-please): entries are generated from Conventional Commits and published via release PRs. The entries below this note are the historical Ruby-era changelog, preserved for reference.
 
+## [1.0.0](https://github.com/jordangarrison/hubctl/compare/hubctl-v0.4.0...hubctl-v1.0.0) (2026-09-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove ruby implementation
+
+### Features
+
+* add homepage URL to gemspec ([585ae5d](https://github.com/jordangarrison/hubctl/commit/585ae5dd24cd61be661d5c4d723b6bef13bb8c7a))
+* **auth:** auth command ([c52d2f5](https://github.com/jordangarrison/hubctl/commit/c52d2f52b57bb3a4306f4ba635227a965de5cdda))
+* **auth:** auth status service ([aae2040](https://github.com/jordangarrison/hubctl/commit/aae2040c35128d362e12d4d377c1ac01fb0dfc0d))
+* **build:** bun compile script and version constant ([f27a403](https://github.com/jordangarrison/hubctl/commit/f27a403ffef32f2025fccb48941bc819c6d5a50e))
+* **cli:** global options and mode wiring ([a6fbac5](https://github.com/jordangarrison/hubctl/commit/a6fbac5db209b102055838275f4da52e81e3bc81))
+* **cli:** main entrypoint and bin shim ([9856cf0](https://github.com/jordangarrison/hubctl/commit/9856cf0bd663a0be88fc7c1dc82e0ce4d6c7542b))
+* **cli:** root command tree and version ([84803be](https://github.com/jordangarrison/hubctl/commit/84803be96ecf4142be5e00de2c66b1b6e22da36a))
+* **config:** add the config command group (get/set/list/init/path) ([75ee4f9](https://github.com/jordangarrison/hubctl/commit/75ee4f92e5afed1097ff2a4129f9e4c60f6ee08c))
+* **config:** config service with token/org resolution ([fd2058a](https://github.com/jordangarrison/hubctl/commit/fd2058af6d759343943fd6df97e9b756df091c0a))
+* **config:** expose configPath on the Config service ([241c15a](https://github.com/jordangarrison/hubctl/commit/241c15ab258f64ce98f15e0e7d8de4e04847ff74))
+* **config:** parse the config file through the effectful decode helper ([53071a4](https://github.com/jordangarrison/hubctl/commit/53071a448382324a8fb0288d9a7b5e5b6b5c7c0c))
+* enable remote execution via nix run github:jordangarrison/hubctl ([af3aa13](https://github.com/jordangarrison/hubctl/commit/af3aa135ac331dc488a6811747a64c5c04d54e3f))
+* **enterprise:** add comprehensive GitHub Enterprise management ([cbfad1a](https://github.com/jordangarrison/hubctl/commit/cbfad1a0a7ada75a1bd147ca4bc5f53eae32e8ea))
+* **enterprise:** audit-log ([1b0b12c](https://github.com/jordangarrison/hubctl/commit/1b0b12c3fcd8f1037f91db15dd4c6250f2059879))
+* **enterprise:** billing ([9fccad9](https://github.com/jordangarrison/hubctl/commit/9fccad98bf93e38ece32d29758a604c3d2e0cd01))
+* **enterprise:** licenses ([abe7196](https://github.com/jordangarrison/hubctl/commit/abe7196eb236cf0798b13cf12e3cd9fbdb43f7c0))
+* **enterprise:** members ([8b543ff](https://github.com/jordangarrison/hubctl/commit/8b543ff7a5bd82ffa5604075a8c2b388c69ac1dc))
+* **enterprise:** orgs ([6468adc](https://github.com/jordangarrison/hubctl/commit/6468adcd017a4a452ff3c7cbe8d5ef2447c948fa))
+* **enterprise:** owners ([df4e26e](https://github.com/jordangarrison/hubctl/commit/df4e26e97e33b333311d97a772614a332465c715))
+* **enterprise:** security-analysis ([ce3bcd6](https://github.com/jordangarrison/hubctl/commit/ce3bcd66b6768b04f7ada64402fe1d0968efecbe))
+* **enterprise:** show ([5742e4f](https://github.com/jordangarrison/hubctl/commit/5742e4fe2abbe810eb654bb14f0ebdfb3289fe5d))
+* **enterprise:** sso ([75bcd37](https://github.com/jordangarrison/hubctl/commit/75bcd3744265cda518b6e405fde49bd6c120ff1c))
+* **enterprise:** stats ([20c4f50](https://github.com/jordangarrison/hubctl/commit/20c4f50301665efa87c180275bbe8760f8f7de18))
+* **github:** admit DecodeError into the GithubError union ([26f1737](https://github.com/jordangarrison/hubctl/commit/26f1737a3bc392711a6afd2129be1517264d9de9))
+* **github:** name the missing OAuth scope in the ForbiddenError fix ([8d8ab6b](https://github.com/jordangarrison/hubctl/commit/8d8ab6b2db62f621ffeaa996b9e3ebb2a4860f23))
+* **github:** Octokit-backed Github service with pagination ([de26f88](https://github.com/jordangarrison/hubctl/commit/de26f886618654567a288836fe7076d0ccd1baf3))
+* **github:** typed error ADT and Octokit error mapping ([aae0d5f](https://github.com/jordangarrison/hubctl/commit/aae0d5f105d9df87ca81f1e82fbf985065675e9b))
+* improve team member and organization invitation functionality ([602ea6e](https://github.com/jordangarrison/hubctl/commit/602ea6e8685a77ff4bfb6f43f82ff82885e42051))
+* initial commit with format flag fixes and git ignore ([762f649](https://github.com/jordangarrison/hubctl/commit/762f6497971896564b573dfc6f6e49a55fcaed4c))
+* **orgs,teams:** add orgs invite and teams repo-access commands ([0858149](https://github.com/jordangarrison/hubctl/commit/0858149b42f22fc6770dd7fe8cb9c642319c843f))
+* **orgs,teams:** add orgs invite and teams repo-access commands ([fb7476f](https://github.com/jordangarrison/hubctl/commit/fb7476fa0a813d3a71bcbe2eac7fbbb797607516))
+* **orgs:** invite ([c825479](https://github.com/jordangarrison/hubctl/commit/c82547983eff5b6f3060c2d7b70ba544b5598476))
+* **orgs:** list ([9e8b786](https://github.com/jordangarrison/hubctl/commit/9e8b786664a5770c00ec007270d6c608e81c08be))
+* **orgs:** members ([92648cc](https://github.com/jordangarrison/hubctl/commit/92648cc595e6680852f8873df89cb3e31598c86c))
+* **orgs:** remove ([3983cd5](https://github.com/jordangarrison/hubctl/commit/3983cd5ce9b6662acbcdf5677cb0ccdaabc3d7eb))
+* **orgs:** repos / teams / info ([1bdd40e](https://github.com/jordangarrison/hubctl/commit/1bdd40ee66566d1b645311ae07114c0b7094a1f2))
+* **orgs:** show ([6127171](https://github.com/jordangarrison/hubctl/commit/612717181596d1e3af34449c3a9fac0afc249c26))
+* **output:** add JSON envelope type and builders ([e783cd4](https://github.com/jordangarrison/hubctl/commit/e783cd452e0ca8538d9f99d9595928edd8421b7d))
+* **output:** add output mode resolution ([e841afc](https://github.com/jordangarrison/hubctl/commit/e841afc80c4337f6799c170c414f64e39891e89f))
+* **output:** add Output service with json and pretty renderers ([f0e6ead](https://github.com/jordangarrison/hubctl/commit/f0e6ead9eb9f63a4f405bf8acce746f6f76ac8d6))
+* **output:** NDJSON streaming with terminal envelope ([810362e](https://github.com/jordangarrison/hubctl/commit/810362e8b9040f24748b9442a539326e5f8f253f))
+* **output:** truncate large result lists ([d22b28c](https://github.com/jordangarrison/hubctl/commit/d22b28c2c2bc460bf34723fbeab2bab3a9cab241))
+* **repos:** archive ([8812d6c](https://github.com/jordangarrison/hubctl/commit/8812d6c3a0d67ebfee260e194684dc19b6d1ecc9))
+* **repos:** clone ([9c0d7ae](https://github.com/jordangarrison/hubctl/commit/9c0d7ae95c2b9dd2000a0ba25251ed9bc0fc3470))
+* **repos:** create ([c259087](https://github.com/jordangarrison/hubctl/commit/c2590877346dd75e3393643fec097ff72cd33962))
+* **repos:** list ([5bebeb3](https://github.com/jordangarrison/hubctl/commit/5bebeb3a0d19de1505fcb2acd6dabf15432b0340))
+* **repos:** show ([7fd3943](https://github.com/jordangarrison/hubctl/commit/7fd39439410ca59b7ae016f1dad407537781eb20))
+* **repos:** topics ([438e18d](https://github.com/jordangarrison/hubctl/commit/438e18d036ade3e47e7fcfb7fe790077c40a05d2))
+* **schema:** add decode helper that fails into the typed E channel ([dd88a4b](https://github.com/jordangarrison/hubctl/commit/dd88a4be6f39fc2c957f05fa94e2dcda326f1ebf))
+* **scripts:** interactive REPL runtime harness ([578105b](https://github.com/jordangarrison/hubctl/commit/578105b2da1ff6dc4d84f5768274086e4066ff1d))
+* **services:** harden all GitHub payload decodes into ok:false envelopes ([ad9a3ad](https://github.com/jordangarrison/hubctl/commit/ad9a3ad479a30b5f8a3dd56be49a52b8f741564c))
+* **teams:** add ([d938691](https://github.com/jordangarrison/hubctl/commit/d938691c8edda37f66aaaf1b0489b80e25413f98))
+* **teams:** create ([1104794](https://github.com/jordangarrison/hubctl/commit/11047945368d10b872e058a894527bb1db8d75ae))
+* **teams:** list ([c368be2](https://github.com/jordangarrison/hubctl/commit/c368be2f187b75ad19d332f0e911aa63b9669c35))
+* **teams:** members ([c99b9fb](https://github.com/jordangarrison/hubctl/commit/c99b9fb8f327b315a91a738dff07a641b73eed0c))
+* **teams:** remove ([d61b553](https://github.com/jordangarrison/hubctl/commit/d61b5539e4454030e13c61966b6e112da4ff7c09))
+* **teams:** show ([f1af02f](https://github.com/jordangarrison/hubctl/commit/f1af02fe40a7a46a3d48fb4d4dfb8ba3eefce98c))
+* **users:** show, whoami, list, invite, remove command group ([931eedb](https://github.com/jordangarrison/hubctl/commit/931eedb8cf454a5662611e635d296c58922b0895))
+
+
+### Bug Fixes
+
+* add arm64-darwin platform support and build dependencies ([81ff137](https://github.com/jordangarrison/hubctl/commit/81ff137ba7ff37840014917b580b3e21cad3fc67))
+* **cli:** --org falls back to GITHUB_ORG env and default_org config ([acb1df2](https://github.com/jordangarrison/hubctl/commit/acb1df2e03f6cf700ecaca14c923846f3b01fc3e))
+* **cli:** honor --json/--pretty/--no-color instead of erroring to help ([8f81a76](https://github.com/jordangarrison/hubctl/commit/8f81a769c73295b5c1a19f3833ad89c27e30cedb))
+* enterprise billing command output formatting ([8a1d0e4](https://github.com/jordangarrison/hubctl/commit/8a1d0e4e2bd445dfeac683f3f43f6a1b078e64e3))
+* **enterprise:** billing pretty/flatten path ([d06f1cf](https://github.com/jordangarrison/hubctl/commit/d06f1cf0f2299686146b4afcbbd63f19705b9fd9))
+* **enterprise:** bound audit-log to one page + surface the next cursor ([57af419](https://github.com/jordangarrison/hubctl/commit/57af419b4c5e509deb4af9803add405c004fc08a))
+* **enterprise:** implement GitHub Enterprise Cloud API compatibility ([4dedc8d](https://github.com/jordangarrison/hubctl/commit/4dedc8d2756b66c961872f26c162c09bb18ab450))
+* **enterprise:** read audit-log @timestamp/_document_id wire keys ([433fec9](https://github.com/jordangarrison/hubctl/commit/433fec9310f1f751a0bf54b35fa864811258a1f7))
+* **enterprise:** stats report shape ([62496ae](https://github.com/jordangarrison/hubctl/commit/62496aecd1ec10af3607eb9a3a25254718cc4cb3))
+* **nix:** resolve Ruby installation and shared library errors ([94a2027](https://github.com/jordangarrison/hubctl/commit/94a202790f57c6a2f9d9af99dbc6b96618be1d1d))
+* **orgs:** tolerate fields absent from list/summary endpoints ([95ae480](https://github.com/jordangarrison/hubctl/commit/95ae4806fbd0b1a71bfb46569ca996d788104d41))
+* **output:** --no-color no longer forces json mode ([c2df022](https://github.com/jordangarrison/hubctl/commit/c2df0229d38fa86f0d56994b3fdd28912f4323f7))
+* **repos:** clone reports failure on non-zero git exit ([12ead66](https://github.com/jordangarrison/hubctl/commit/12ead667350776a13975edfacb861711f15475bc))
+* **teams:** make list members_count/repos_count optional ([8dad6fd](https://github.com/jordangarrison/hubctl/commit/8dad6fdffaa664adf20e47d2fc73d39fb719d4f2))
+* update email address in gemspec ([42b945c](https://github.com/jordangarrison/hubctl/commit/42b945c387ff430430e67544c545d0595d0e29e5))
+* **users:** invite surfaces role and inviter ([65cd846](https://github.com/jordangarrison/hubctl/commit/65cd846bdecca1b923b41813398a809d63c5a6f9))
+
+
+### Code Refactoring
+
+* remove ruby implementation ([5998635](https://github.com/jordangarrison/hubctl/commit/5998635e4079dd5ef2203ff518edc163482e0095))
+
 ## [Unreleased]
 
 ### ⚠ BREAKING CHANGES
