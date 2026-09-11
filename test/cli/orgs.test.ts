@@ -110,8 +110,9 @@ describe('orgs command', () => {
       expect(names).toContain('repos')
       expect(names).toContain('teams')
       expect(names).toContain('info')
-      // invite/remove are NOT part of the Ruby `orgs` group (they live in `users`).
-      expect(names).not.toContain('invite')
+      // `orgs invite` is an org-scoped alias delegating to the same `Users.invite`
+      // service; `remove` still lives only in `users`.
+      expect(names).toContain('invite')
       expect(names).not.toContain('remove')
     })
   )
@@ -285,6 +286,56 @@ describe('orgs command', () => {
           plan: 'pro',
           organizations: [{ index: 1, login: 'acme', description: 'Acme Corp' }],
         })
+      })
+    )
+  })
+
+  // `orgs invite` delegates to the same `Users.invite` service as `users invite`;
+  // these assert the org-scoped positional wiring and the delegation, not the
+  // (already-tested) service internals.
+  describe('invite', () => {
+    it.effect('resolves a username to an invitee id and emits an orgs.invite envelope', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['invite', 'acme', 'octocat', '--team', '13703365'], {
+          github: {
+            routes: {
+              'GET /users/{username}': (params: Record<string, unknown>) =>
+                params.username === 'octocat' ? { id: 583_231 } : { id: 0 },
+              // Return the good invitation only when the resolved invitee_id and
+              // team_ids were forwarded; a sentinel id otherwise makes the assert
+              // below fail without throwing inside the effect.
+              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                params.org === 'acme' &&
+                params.invitee_id === 583_231 &&
+                Array.isArray(params.team_ids) &&
+                params.team_ids[0] === 13_703_365
+                  ? { id: 77, role: 'direct_member', inviter: { login: 'admin-octo' } }
+                  : { id: 0 },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.invite')
+        expect(env.result).toMatchObject({ id: 77, invited: 'octocat', role: 'direct_member', inviter: 'admin-octo' })
+        expect(env.next_actions).toContain('hubctl orgs members <org>')
+      })
+    )
+
+    it.effect('invites by email without a user lookup', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(orgsCommand, ['invite', 'acme', 'new@person.com'], {
+          github: {
+            routes: {
+              'POST /orgs/{org}/invitations': (params: Record<string, unknown>) =>
+                params.email === 'new@person.com' ? { id: 88, role: 'direct_member' } : { id: 0 },
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('orgs.invite')
+        expect(env.result).toMatchObject({ id: 88, invited: 'new@person.com' })
       })
     )
   })

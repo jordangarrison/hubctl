@@ -85,6 +85,7 @@ describe('teams command', () => {
       expect(names).toContain('members')
       expect(names).toContain('add')
       expect(names).toContain('remove')
+      expect(names).toContain('repo-access')
     })
   )
 
@@ -399,6 +400,108 @@ describe('teams command', () => {
         expect(env.ok).toBe(true)
         expect(env.command).toBe('teams.remove')
         expect(env.result).toMatchObject({ team: 'core', user: 'octocat', removed: true })
+      })
+    )
+  })
+
+  describe('repo-access', () => {
+    it.effect('with no subcommand lists grant/remove/list', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['repo-access'], {})
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.repo-access')
+        const names = decodeGroup(env.result).commands.map((c) => c.name)
+        expect(names).toContain('list')
+        expect(names).toContain('grant')
+        expect(names).toContain('remove')
+      })
+    )
+
+    it.effect('list emits shaped repo rows with the effective permission', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['repo-access', 'list', 'core', '--org', 'acme'], {
+          github: {
+            routes: {
+              'GET /orgs/{org}/teams/{team_slug}/repos': [
+                {
+                  name: 'orbit',
+                  full_name: 'acme/orbit',
+                  private: true,
+                  role_name: 'read',
+                  permissions: { admin: false, maintain: false, push: false, triage: false, pull: true },
+                },
+              ],
+            },
+          },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.repo-access.list')
+        expect(env.result).toMatchObject([
+          { name: 'orbit', full_name: 'acme/orbit', private: true, permission: 'read' },
+        ])
+        expect(env.next_actions).toContain('hubctl teams repo-access grant <team> <repo> --org <org>')
+      })
+    )
+
+    // `grantRepo` echoes its arguments, and those owner/repo values come straight
+    // from the command's `parseRepo`, so asserting the result verifies the bare
+    // name defaulted its owner to the resolved org and the permission defaulted to
+    // pull — no need to inspect wire params in the fixture.
+    it.effect('grant defaults to pull and defaults owner=org for a bare repo name', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['repo-access', 'grant', 'core', 'orbit', '--org', 'acme'], {
+          github: { routes: { 'PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': {} } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.repo-access.grant')
+        expect(env.result).toMatchObject({
+          team: 'core',
+          owner: 'acme',
+          repo: 'orbit',
+          permission: 'pull',
+          granted: true,
+        })
+      })
+    )
+
+    it.effect('grant honors --permission and splits a fully-qualified owner/name repo', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(
+          teamsCommand,
+          ['repo-access', 'grant', 'core', 'other/orbit', '--org', 'acme', '--permission', 'push'],
+          { github: { routes: { 'PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': {} } } }
+        )
+
+        expect(env.ok).toBe(true)
+        expect(env.result).toMatchObject({ owner: 'other', repo: 'orbit', permission: 'push' })
+      })
+    )
+
+    it.effect('remove without --yes fails with a re-run fix and does NOT call the API', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['repo-access', 'remove', 'core', 'orbit', '--org', 'acme'], {
+          // No DELETE route registered: reaching an ok:false envelope proves it gated.
+          github: {},
+        })
+
+        expect(env.ok).toBe(false)
+        expect(env.command).toBe('teams.repo-access.remove')
+        expect(env.result).toBeNull()
+        expect(env.fix).toContain('--yes')
+      })
+    )
+
+    it.effect('remove with --yes revokes access', () =>
+      Effect.gen(function* () {
+        const env = yield* runCli(teamsCommand, ['repo-access', 'remove', 'core', 'orbit', '--org', 'acme', '--yes'], {
+          github: { routes: { 'DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}': {} } },
+        })
+
+        expect(env.ok).toBe(true)
+        expect(env.command).toBe('teams.repo-access.remove')
+        expect(env.result).toMatchObject({ team: 'core', owner: 'acme', repo: 'orbit', removed: true })
       })
     )
   })

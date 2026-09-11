@@ -183,6 +183,7 @@ Global behavior: destructive commands (those exposing `--yes`) require **`--yes`
 | `orgs members` | `<org>`, `--role <all\|admin\|member>`, `--2fa-disabled` | List organization members. |
 | `orgs repos` | `<org>`, `--type <all\|public\|private\|forks\|sources\|member>`, `--sort <created\|updated\|pushed\|full_name>` | List organization repositories. |
 | `orgs teams` | `<org>` | List organization teams. |
+| `orgs invite` | `<org> <target>` (email or username), `--role <string>`, `--team <csv team ids>` | Invite a user to the organization (alias for `users invite`). |
 | `orgs info` | — | Show the authenticated user's organization memberships. |
 
 ### users
@@ -205,6 +206,9 @@ Global behavior: destructive commands (those exposing `--yes`) require **`--yes`
 | `teams members` | `<team>` (slug), `--org <string>` | List team members. |
 | `teams add` | `<team> <user>`, `--org <string>`, `--role <member\|maintainer>` | Add a user to a team. |
 | `teams remove` | `<team> <user>`, `--org <string>`, `--yes` | Remove a user from a team. **Destructive** — `--yes` required in JSON mode. |
+| `teams repo-access list` | `<team>` (slug), `--org <string>` | List repositories a team can access, with the team's effective permission. |
+| `teams repo-access grant` | `<team> <repo>` (name or owner/name), `--org <string>`, `--permission <pull\|triage\|push\|maintain\|admin>` | Grant or update a team's access to a repository. |
+| `teams repo-access remove` | `<team> <repo>` (name or owner/name), `--org <string>`, `--yes` | Revoke a team's access to a repository. **Destructive** — `--yes` required in JSON mode. |
 
 ### enterprise
 
