@@ -93,7 +93,7 @@ jobs:
           fetch-depth: 0
 
       # Determinate Nix, flakes-on-by-default.
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/nix-installer-action@v23
 
       # /nix/store cache via the GitHub Actions cache — no external account or
       # secret (works on PRs/forks), and avoids the deprecated magic-nix-cache's
@@ -150,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/nix-installer-action@v23
 
       # Same key as validate-nix: restores a warm /nix/store.
       - uses: nix-community/cache-nix-action@v7
