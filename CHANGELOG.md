@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚠ BREAKING CHANGES
 
+- **Intel macOS Nix support removed.** Nix packages, apps, and dev shells no longer include `x86_64-darwin`, following the upstream nix-systems defaults and nixpkgs Bun package. Supported Nix systems are `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin` (Apple Silicon macOS). Standalone release targets remain Linux x64 and macOS ARM64.
+
 - **Complete rewrite in Bun + TypeScript + Effect v4.** `hubctl` has been reimplemented from the ground up. The previous Ruby/Thor implementation has been removed. The TypeScript CLI is at full feature parity (minus the stubbed `server` command).
 - **Agent-first JSON envelope output by default.** Every command now emits a structured JSON envelope (`{ ok, command, result, next_actions, error, fix }`) when piped or non-interactive, with an automatic human-friendly `--pretty` rendering at a TTY. The Ruby `--format table|json|list` flag has been **removed** — the envelope subsumes it (see ADR-000002).
 

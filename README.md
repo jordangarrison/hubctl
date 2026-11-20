@@ -23,7 +23,11 @@ The gem still builds from that ref (`ruby >= 3.1`, `bundle install`, `bin/hubctl
 
 ### Nix (flake)
 
-This repository is a Nix flake. Its `packages.default` is a **Bun wrapper over the app** (it runs the TypeScript entrypoint via nixpkgs' `bun`, keeping `hubctl` on `PATH` unchanged for Devbox/Nix users):
+This repository is a Nix flake. Its `packages.default` is a **Bun wrapper over the app** (it runs the TypeScript entrypoint via nixpkgs' `bun`, keeping `hubctl` on `PATH` unchanged for Devbox/Nix users).
+
+The Nix package, app, and dev shell support `x86_64-linux`, `aarch64-linux`, and Apple Silicon macOS (`aarch64-darwin`). Intel macOS (`x86_64-darwin`) Nix support has been removed: the updated upstream nix-systems defaults and nixpkgs Bun package no longer include it. Standalone release targets are unchanged: Linux x64 and macOS ARM64.
+
+Build or run with Nix:
 
 ```sh
 nix build            # builds packages.default → ./result/bin/hubctl
